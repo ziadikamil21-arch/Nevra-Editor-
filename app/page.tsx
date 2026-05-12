@@ -10,9 +10,24 @@ import { processImageWithCanvas } from '@/lib/canvas-image-processor';
 type FileMode = 'video' | 'photo';
 
 const QUALITY_CONFIG = {
-  normal: { label: 'Normal', speed: 'Ultra Fast', desc: 'Crop · Bitrate · Metadata', color: '#10b981', rgb: '16,185,129', glow: 'rgba(16,185,129,0.2)' },
-  max:    { label: 'Max',    speed: '~15s / variant', desc: 'Pitch · Zoom · Hue · Color filter', color: '#f59e0b', rgb: '245,158,11', glow: 'rgba(245,158,11,0.2)' },
-  pro:    { label: 'Pro',    speed: 'Premium',  desc: 'Rotation · Speed · Mirror · Ghost text', color: '#a78bfa', rgb: '124,58,237', glow: 'rgba(124,58,237,0.25)' },
+  normal: {
+    label: 'Normal', speed: 'Ultra Fast',
+    descVideo: 'Crop · Bitrate · Metadata',
+    descPhoto: 'Crop · Metadata',
+    color: '#10b981', rgb: '16,185,129', glow: 'rgba(16,185,129,0.2)',
+  },
+  max: {
+    label: 'Max', speed: '~15s / variant',
+    descVideo: 'Pitch · Zoom · Hue · Color filter',
+    descPhoto: 'Zoom · Hue · Color filter',
+    color: '#f59e0b', rgb: '245,158,11', glow: 'rgba(245,158,11,0.2)',
+  },
+  pro: {
+    label: 'Pro', speed: 'Premium',
+    descVideo: 'Rotation · Speed · Mirror · Ghost text',
+    descPhoto: 'Rotation · Zoom · Hue · Ghost text',
+    color: '#a78bfa', rgb: '124,58,237', glow: 'rgba(124,58,237,0.25)',
+  },
 } as const;
 
 function fmtBytes(b: number) {
@@ -91,7 +106,7 @@ function VariantCard({ v, onDelete, onDownload }: { v: ClientVariant; onDelete: 
           {s.pitchPct > 0.001 && <TransformRow icon="🔊" label="Audio pitch" value={`+${s.pitchPct.toFixed(3)}%`} color="#34d399" />}
           {s.speedPct > 0.001 && <TransformRow icon="⏩" label="Speed" value={`+${s.speedPct.toFixed(3)}%`} color="#fbbf24" />}
           {Math.abs(s.rotationDeg) > 0.01 && <TransformRow icon="🔄" label="Rotation" value={`${s.rotationDeg > 0 ? '+' : ''}${s.rotationDeg.toFixed(3)}°`} color="#c084fc" />}
-          {s.mirror && <TransformRow icon="🪞" label="Mirror" value="Horizontal flip — confirmed" color="#67e8f9" />}
+          {s.mirror && <TransformRow icon="🪞" label="Mirror" value="Horizontal flip" color="#67e8f9" />}
           {s.warmth !== 'neutral' && (
             <TransformRow
               icon={s.warmth === 'warm' ? '🌅' : '🧊'}
@@ -550,7 +565,9 @@ export default function Home() {
                   {sel && <div className="absolute top-2.5 right-2.5 w-1.5 h-1.5 rounded-full" style={{ background: cfg.color }} />}
                   <p className="font-black text-sm mb-0.5" style={{ color: sel ? cfg.color : '#9ca3af' }}>{cfg.label}</p>
                   <p className="text-[10px] font-medium mb-1.5" style={{ color: sel ? cfg.color : '#374151', opacity: 0.85 }}>{cfg.speed}</p>
-                  <p className="text-[10px] leading-relaxed" style={{ color: '#374151' }}>{cfg.desc}</p>
+                  <p className="text-[10px] leading-relaxed" style={{ color: '#374151' }}>
+                    {activeMode === 'photo' ? cfg.descPhoto : cfg.descVideo}
+                  </p>
                 </button>
               );
             })}
