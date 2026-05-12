@@ -91,7 +91,7 @@ function VariantCard({ v, onDelete, onDownload }: { v: ClientVariant; onDelete: 
           {s.pitchPct > 0.001 && <TransformRow icon="🔊" label="Audio pitch" value={`+${s.pitchPct.toFixed(3)}%`} color="#34d399" />}
           {s.speedPct > 0.001 && <TransformRow icon="⏩" label="Speed" value={`+${s.speedPct.toFixed(3)}%`} color="#fbbf24" />}
           {Math.abs(s.rotationDeg) > 0.01 && <TransformRow icon="🔄" label="Rotation" value={`${s.rotationDeg > 0 ? '+' : ''}${s.rotationDeg.toFixed(3)}°`} color="#c084fc" />}
-          {s.mirror && <TransformRow icon="🪞" label="Mirror" value="Horizontal flip" color="#67e8f9" />}
+          {s.mirror && <TransformRow icon="🪞" label="Mirror" value="Horizontal flip — confirmed" color="#67e8f9" />}
           {s.warmth !== 'neutral' && (
             <TransformRow
               icon={s.warmth === 'warm' ? '🌅' : '🧊'}
@@ -215,6 +215,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [ffmpegReady, setFfmpegReady] = useState(false);
   const [ffmpegLoading, setFfmpegLoading] = useState(false);
+  const [showMirrorModal, setShowMirrorModal] = useState(false);
 
   // One FFmpeg instance for videos — photos use Canvas API (no WASM needed)
   const ffVideoRef = useRef<import('@ffmpeg/ffmpeg').FFmpeg | null>(null);
@@ -276,7 +277,7 @@ export default function Home() {
   // Switching mode never clears the other mode's state
   const switchMode = (mode: FileMode) => { setActiveMode(mode); setError(null); };
 
-  const handleCreate = async () => {
+  const handleCreate = async (mirrorChoice?: boolean) => {
     const isImage = activeMode === 'photo';
     const currentFile = isImage ? photoFile : videoFile;
     const currentIsProcessing = isImage ? photoIsProcessing : videoIsProcessing;
@@ -331,6 +332,8 @@ export default function Home() {
       if (i === 0) setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
       try {
         const params = generateParams(quality, vowbMode, false, false);
+        // Apply user's mirror choice (confirmed via modal before processing)
+        if (mirrorChoice !== undefined) params.mirror = mirrorChoice;
         const outputName = `video_v${i + 1}_${Math.random().toString(36).slice(2, 8)}.mp4`;
         const onProgress = ({ progress }: { progress: number }) => {
           setVariants((prev) => prev.map((v) => v.index === i ? { ...v, ffmpegProgress: Math.max(0, Math.min(1, progress)) } : v));
@@ -578,7 +581,7 @@ export default function Home() {
         <button
           className="btn-gradient w-full py-4 rounded-2xl font-bold text-base text-white tracking-widest uppercase"
           disabled={!file || (activeMode === 'video' && !ffmpegReady) || isProcessing}
-          onClick={handleCreate}
+          onClick={() => activeMode === 'video' ? setShowMirrorModal(true) : handleCreate()}
         >
           {isProcessing ? (
             <span className="flex items-center justify-center gap-2">
@@ -588,7 +591,7 @@ export default function Home() {
               </svg>
               Editing in browser...
             </span>
-          ) : !ffmpegReady ? 'Loading engine...'
+          ) : (activeMode === 'video' && !ffmpegReady) ? 'Loading engine...'
             : `⚡  Create ${variantCount} Variant${variantCount !== 1 ? 's' : ''}`}
         </button>
 
@@ -614,6 +617,43 @@ export default function Home() {
           Nevra Editor · Processing runs entirely in your browser
         </p>
       </div>
+
+      {/* Mirror modal — video only, shown before processing starts */}
+      {showMirrorModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4"
+          style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}>
+          <div className="w-full max-w-sm rounded-2xl border overflow-hidden"
+            style={{ background: '#0c0c1e', borderColor: '#2d2d5a', boxShadow: '0 0 60px rgba(124,58,237,0.3)' }}>
+            {/* Header */}
+            <div className="px-6 pt-6 pb-4">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4"
+                style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)' }}>🪞</div>
+              <p className="text-lg font-black text-center" style={{ color: '#f0f0ff' }}>Effet miroir ?</p>
+              <p className="text-sm text-center mt-2" style={{ color: '#6b7280' }}>
+                Appliquer le miroir horizontal sur les variantes ?<br />
+                <span style={{ color: '#4b5563', fontSize: '11px' }}>
+                  Désactiver si la vidéo contient du texte visible.
+                </span>
+              </p>
+            </div>
+            {/* Buttons */}
+            <div className="px-6 pb-6 grid grid-cols-2 gap-3">
+              <button
+                onClick={() => { setShowMirrorModal(false); handleCreate(false); }}
+                className="py-3 rounded-xl font-bold text-sm transition-all"
+                style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#9ca3af' }}>
+                ❌ Non, sans miroir
+              </button>
+              <button
+                onClick={() => { setShowMirrorModal(false); handleCreate(true); }}
+                className="py-3 rounded-xl font-bold text-sm transition-all"
+                style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: 'white', boxShadow: '0 0 20px rgba(124,58,237,0.35)' }}>
+                🪞 Oui, mirror
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

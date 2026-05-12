@@ -106,7 +106,9 @@ export function generateParams(quality: Quality, vowb = false, powb = false, isI
     if (!isImage) p.speedFactor = 1 + rand(0.005, 0.015); // audio/PTS only
     p.zoomFactor = 1 + rand(0.01, 0.02);
     p.hueShift = rand(-5, 5);
-    p.mirror = Math.random() > 0.4; // 60% chance mirror in pro
+    // Mirror only for videos — never for photos (text would be reversed)
+    // For videos, the user confirms mirror via a modal before processing starts
+    if (!isImage) p.mirror = false; // default off — page.tsx overrides with user choice
     p.invisibleText = true;
     p.bitrate = randInt(2400, 3600);
     p.warmthStrength = rand(0.04, 0.1); // stronger filter in pro
