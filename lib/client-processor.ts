@@ -40,6 +40,7 @@ interface TransformParams {
   speedFactor: number;
   bitrate: number;
   audioBitrate: number;
+  preset: string;
   mirror: boolean;
   warmth: 'warm' | 'cold' | 'neutral';
   warmthStrength: number;
@@ -66,6 +67,7 @@ export function generateParams(quality: Quality, vowb = false, powb = false): Tr
     speedFactor: 1,
     bitrate: randInt(2700, 3300),
     audioBitrate: randInt(128, 192),
+    preset: 'ultrafast', // Normal default — genuinely fast
     mirror: false,
     warmth: 'neutral',
     warmthStrength: 0,
@@ -86,6 +88,7 @@ export function generateParams(quality: Quality, vowb = false, powb = false): Tr
     p.satFactor = 1 + rand(-0.03, 0.04);
     p.zoomFactor = 1 + rand(0.005, 0.012);
     p.bitrate = randInt(2500, 3500);
+    p.preset = 'fast';
     // Warm or cold filter (random)
     const side = Math.random();
     if (side < 0.45) {
@@ -236,7 +239,7 @@ export function buildFFmpegArgs(
   } else {
     args.push(
       '-c:v', 'libx264',
-      '-preset', 'fast',
+      '-preset', p.preset,
       '-crf', '20',
       '-pix_fmt', 'yuv420p',   // Required for QuickTime / Instagram compatibility
       '-b:v', `${p.bitrate}k`,

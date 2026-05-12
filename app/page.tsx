@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   generateParams, paramsToSummary, buildFFmpegArgs,
-  type Quality, type TransformSummary, type ClientVariant,
+  type Quality, type ClientVariant,
 } from '@/lib/client-processor';
 
 type FileMode = 'video' | 'photo';
@@ -30,13 +30,7 @@ function TransformRow({ icon, label, value, color }: { icon: string; label: stri
   );
 }
 
-function VariantCard({
-  v, onDelete, onDownload,
-}: {
-  v: ClientVariant;
-  onDelete: () => void;
-  onDownload: () => void;
-}) {
+function VariantCard({ v, onDelete, onDownload }: { v: ClientVariant; onDelete: () => void; onDownload: () => void }) {
   const s = v.summary;
   const isDone = v.status === 'done';
   const isProcessing = v.status === 'processing';
@@ -49,7 +43,6 @@ function VariantCard({
         borderColor: isDone ? '#2d2d5a' : isProcessing ? '#7c3aed' : isError ? '#7f1d1d' : '#1a1a32',
         boxShadow: isProcessing ? '0 0 20px rgba(124,58,237,0.15)' : 'none',
       }}>
-
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: '#1a1a32' }}>
         <div className="flex items-center gap-2.5">
@@ -71,30 +64,22 @@ function VariantCard({
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
               </svg>
-              {v.ffmpegProgress > 0 && (
-                <span className="font-mono text-[10px]">{Math.round(v.ffmpegProgress * 100)}%</span>
-              )}
+              {v.ffmpegProgress > 0 && <span className="font-mono text-[10px]">{Math.round(v.ffmpegProgress * 100)}%</span>}
             </div>
           )}
           {isDone && <span className="text-xs font-bold" style={{ color: '#10b981' }}>✓ Done</span>}
           {isError && <span className="text-xs font-bold" style={{ color: '#ef4444' }}>✗ Error</span>}
           {v.status === 'pending' && <span className="text-xs" style={{ color: '#374151' }}>Waiting</span>}
-          {/* Red delete button */}
-          <button
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            title="Remove"
+          <button onClick={(e) => { e.stopPropagation(); onDelete(); }} title="Remove"
             className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black transition-all hover:scale-110"
-            style={{ background: 'rgba(239,68,68,0.2)', color: '#f87171', border: '1px solid rgba(239,68,68,0.35)', flexShrink: 0 }}
-          >✕</button>
+            style={{ background: 'rgba(239,68,68,0.2)', color: '#f87171', border: '1px solid rgba(239,68,68,0.35)', flexShrink: 0 }}>✕</button>
         </div>
       </div>
 
-      {/* Transformations — only after done */}
+      {/* Transforms */}
       {isDone && s && (
         <div className="px-3 py-3 space-y-1">
-          <p className="text-[10px] font-bold uppercase tracking-widest px-1 mb-2" style={{ color: '#374151' }}>
-            Applied Transformations
-          </p>
+          <p className="text-[10px] font-bold uppercase tracking-widest px-1 mb-2" style={{ color: '#374151' }}>Applied Transformations</p>
           {s.vowb && <TransformRow icon="🤍" label="White background" value="VOWB Edit" color="#f1f5f9" />}
           {s.powb && <TransformRow icon="🤍" label="White background" value="POWB Edit" color="#f1f5f9" />}
           <TransformRow icon="✂️" label="Crop" value={`${s.cropPx}px each edge`} color="#94a3b8" />
@@ -114,11 +99,10 @@ function VariantCard({
               color={s.warmth === 'warm' ? '#fb923c' : '#67e8f9'}
             />
           )}
-          {s.invisibleText && <TransformRow icon="👻" label="Ghost text" value="1px · α 2%" color="#818cf8" />}
+          {s.invisibleText && <TransformRow icon="👻" label="Ghost text" value="invisible micro-shift" color="#818cf8" />}
         </div>
       )}
 
-      {/* Processing animation */}
       {isProcessing && (
         <div className="px-3 py-3 space-y-1.5">
           {[75, 55, 65, 50, 70].map((w, i) => (
@@ -132,20 +116,13 @@ function VariantCard({
         </div>
       )}
 
-      {isError && (
-        <div className="px-4 py-3 text-xs" style={{ color: '#f87171' }}>
-          {v.error ?? 'Processing failed'}
-        </div>
-      )}
+      {isError && <div className="px-4 py-3 text-xs" style={{ color: '#f87171' }}>{v.error ?? 'Processing failed'}</div>}
 
-      {/* Download */}
       {isDone && v.blobUrl && (
         <div className="px-3 pb-3 mt-1">
-          <button
-            onClick={onDownload}
+          <button onClick={onDownload}
             className="w-full flex items-center justify-center gap-2 text-sm font-bold py-2.5 rounded-xl"
-            style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: 'white' }}
-          >
+            style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: 'white' }}>
             ⬇ Download Variant {v.index + 1}
           </button>
         </div>
@@ -154,49 +131,128 @@ function VariantCard({
   );
 }
 
+function ResultsSection({
+  label, icon, variants, deletedIdxs, isProcessing,
+  onDelete, onDownload, onDownloadAll, resultsRef,
+}: {
+  label: string; icon: string;
+  variants: ClientVariant[]; deletedIdxs: Set<number>; isProcessing: boolean;
+  onDelete: (idx: number) => void; onDownload: (v: ClientVariant) => void;
+  onDownloadAll: () => void; resultsRef: React.RefObject<HTMLDivElement>;
+}) {
+  const visible = variants.filter((v) => !deletedIdxs.has(v.index));
+  const total = variants.length;
+  const doneCount = visible.filter((v) => v.status === 'done').length;
+  const allDone = total > 0 && variants.every((v) => v.status === 'done' || v.status === 'error');
+  const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+  if (visible.length === 0) return null;
+
+  return (
+    <div ref={resultsRef} className="mt-8">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="text-base">{icon}</span>
+          <p className="text-xs font-bold uppercase tracking-widest" style={{ color: '#374151' }}>
+            {label}
+            {doneCount > 0 && <span className="ml-2 font-black" style={{ color: '#7c3aed' }}>{doneCount}/{total}</span>}
+          </p>
+        </div>
+        {doneCount > 1 && (
+          <button onClick={onDownloadAll}
+            className="text-xs px-3 py-1.5 rounded-xl font-semibold"
+            style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.3)', color: '#a78bfa' }}>
+            ⬇ Download All
+          </button>
+        )}
+      </div>
+      <div className="mb-4">
+        <div className="flex justify-between items-center mb-1.5">
+          <span className="text-xs font-medium" style={{ color: allDone ? '#10b981' : '#7c3aed' }}>
+            {allDone ? `✅ ${doneCount} variant${doneCount !== 1 ? 's' : ''} ready`
+              : isProcessing ? `Editing variant ${doneCount + 1} of ${total}...`
+              : `${doneCount}/${total} done`}
+          </span>
+          <span className="text-xs font-bold tabular-nums" style={{ color: allDone ? '#10b981' : '#7c3aed' }}>{pct}%</span>
+        </div>
+        <div className="h-1.5 rounded-full overflow-hidden" style={{ background: '#1a1a32' }}>
+          <div className="h-full rounded-full transition-all duration-500"
+            style={{ width: `${pct}%`, background: allDone ? 'linear-gradient(90deg,#10b981,#34d399)' : 'linear-gradient(90deg,#7c3aed,#a78bfa)' }} />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {visible.map((v) => (
+          <VariantCard key={v.index} v={v} onDelete={() => onDelete(v.index)} onDownload={() => onDownload(v)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
-  const [fileMode, setFileMode] = useState<FileMode>('video');
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [activeMode, setActiveMode] = useState<FileMode>('video');
+
+  // ── Video state ──────────────────────────────────────────────────────────
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+  const [videoVariants, setVideoVariants] = useState<ClientVariant[]>([]);
+  const [videoDeletedIdxs, setVideoDeletedIdxs] = useState<Set<number>>(new Set());
+  const [videoIsProcessing, setVideoIsProcessing] = useState(false);
+  const [vowbMode, setVowbMode] = useState(false);
+
+  // ── Photo state ──────────────────────────────────────────────────────────
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const [photoVariants, setPhotoVariants] = useState<ClientVariant[]>([]);
+  const [photoDeletedIdxs, setPhotoDeletedIdxs] = useState<Set<number>>(new Set());
+  const [photoIsProcessing, setPhotoIsProcessing] = useState(false);
+  const [powbMode, setPowbMode] = useState(false);
+
+  // ── Shared ───────────────────────────────────────────────────────────────
   const [quality, setQuality] = useState<Quality>('max');
   const [variantCount, setVariantCount] = useState(3);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const [vowbMode, setVowbMode] = useState(false);
-  const [powbMode, setPowbMode] = useState(false);
   const [ffmpegReady, setFfmpegReady] = useState(false);
   const [ffmpegLoading, setFfmpegLoading] = useState(false);
-  const [variants, setVariants] = useState<ClientVariant[]>([]);
-  const [deletedIdxs, setDeletedIdxs] = useState<Set<number>>(new Set());
-  const [isProcessing, setIsProcessing] = useState(false);
 
-  const ffmpegRef = useRef<import('@ffmpeg/ffmpeg').FFmpeg | null>(null);
+  // Two independent FFmpeg instances — video and photo run in parallel
+  const ffVideoRef = useRef<import('@ffmpeg/ffmpeg').FFmpeg | null>(null);
+  const ffPhotoRef = useRef<import('@ffmpeg/ffmpeg').FFmpeg | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const resultsRef = useRef<HTMLDivElement>(null);
+  const videoResultsRef = useRef<HTMLDivElement>(null);
+  const photoResultsRef = useRef<HTMLDivElement>(null);
 
-  const acceptAttr = fileMode === 'video'
+  // Active-mode shortcuts
+  const file = activeMode === 'video' ? videoFile : photoFile;
+  const previewUrl = activeMode === 'video' ? videoPreviewUrl : photoPreviewUrl;
+  const isProcessing = activeMode === 'video' ? videoIsProcessing : photoIsProcessing;
+  const acceptAttr = activeMode === 'video'
     ? 'video/mp4,video/quicktime,video/x-msvideo,video/webm'
     : 'image/jpeg,image/png,image/webp';
 
-  // Load FFmpeg WASM on mount
+  // Load both FFmpeg instances in parallel on mount
   useEffect(() => {
     async function init() {
       setFfmpegLoading(true);
       try {
         const { FFmpeg } = await import('@ffmpeg/ffmpeg');
         const { toBlobURL } = await import('@ffmpeg/util');
-        const ff = new FFmpeg();
         const base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-        await ff.load({
-          coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, 'text/javascript'),
-          wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
-        });
-        ffmpegRef.current = ff;
+        // Fetch WASM files once, reuse for both instances
+        const [coreURL, wasmURL] = await Promise.all([
+          toBlobURL(`${base}/ffmpeg-core.js`, 'text/javascript'),
+          toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
+        ]);
+        const makeFF = async () => {
+          const ff = new FFmpeg();
+          await ff.load({ coreURL, wasmURL });
+          return ff;
+        };
+        [ffVideoRef.current, ffPhotoRef.current] = await Promise.all([makeFF(), makeFF()]);
         setFfmpegReady(true);
       } catch (e) {
         console.error('FFmpeg load failed', e);
-        setError('Failed to load video engine. Please refresh.');
+        setError('Failed to load engine. Please refresh.');
       } finally {
         setFfmpegLoading(false);
       }
@@ -208,84 +264,67 @@ export default function Home() {
     const isVid = f.type.startsWith('video/');
     const isImg = f.type.startsWith('image/');
     if (!isVid && !isImg) { setError('Unsupported format.'); return; }
-    if (fileMode === 'video' && !isVid) { setError('Please drop a video, or switch to Photo mode.'); return; }
-    if (fileMode === 'photo' && !isImg) { setError('Please drop an image, or switch to Video mode.'); return; }
-    setFile(f);
+    if (activeMode === 'video' && !isVid) { setError('Please drop a video, or switch to Photo mode.'); return; }
+    if (activeMode === 'photo' && !isImg) { setError('Please drop an image, or switch to Video mode.'); return; }
     setError(null);
-    setVariants([]);
-    setDeletedIdxs(new Set());
-    setPreviewUrl(URL.createObjectURL(f));
-  }, [fileMode]);
+    if (activeMode === 'video') {
+      setVideoFile(f); setVideoVariants([]); setVideoDeletedIdxs(new Set());
+      setVideoPreviewUrl(URL.createObjectURL(f));
+    } else {
+      setPhotoFile(f); setPhotoVariants([]); setPhotoDeletedIdxs(new Set());
+      setPhotoPreviewUrl(URL.createObjectURL(f));
+    }
+  }, [activeMode]);
 
-  const switchMode = (mode: FileMode) => {
-    setFileMode(mode);
-    setFile(null);
-    setPreviewUrl(null);
-    setVariants([]);
-    setDeletedIdxs(new Set());
-    setError(null);
-    if (mode === 'photo') setVowbMode(false);
-    if (mode === 'video') setPowbMode(false);
-  };
+  // Switching mode never clears the other mode's state
+  const switchMode = (mode: FileMode) => { setActiveMode(mode); setError(null); };
 
   const handleCreate = async () => {
-    if (!file || !ffmpegRef.current || isProcessing) return;
-    const ff = ffmpegRef.current;
-    const isImage = file.type.startsWith('image/');
-    const ext = file.name.split('.').pop()?.toLowerCase() ?? (isImage ? 'jpg' : 'mp4');
+    const isImage = activeMode === 'photo';
+    const ff = isImage ? ffPhotoRef.current : ffVideoRef.current;
+    const currentFile = isImage ? photoFile : videoFile;
+    if (!currentFile || !ff || (isImage ? photoIsProcessing : videoIsProcessing)) return;
+
+    const ext = currentFile.name.split('.').pop()?.toLowerCase() ?? (isImage ? 'jpg' : 'mp4');
     const outExt = isImage ? 'jpg' : 'mp4';
+    const setVariants = isImage ? setPhotoVariants : setVideoVariants;
+    const setDeletedIdxs = isImage ? setPhotoDeletedIdxs : setVideoDeletedIdxs;
+    const setIsProcessing = isImage ? setPhotoIsProcessing : setVideoIsProcessing;
+    const resultsRef = isImage ? photoResultsRef : videoResultsRef;
 
     setIsProcessing(true);
     setError(null);
     setDeletedIdxs(new Set());
-
-    // Init variant states
-    const initVariants: ClientVariant[] = Array.from({ length: variantCount }, (_, i) => ({
+    setVariants(Array.from({ length: variantCount }, (_, i) => ({
       index: i, status: 'pending', ffmpegProgress: 0, blobUrl: null, filename: null, summary: null,
-    }));
-    setVariants(initVariants);
+    })));
 
-    // Write input file once
     const { fetchFile } = await import('@ffmpeg/util');
-    const inputName = `input.${ext}`;
-    await ff.writeFile(inputName, await fetchFile(file));
+    const inputName = `input_${isImage ? 'p' : 'v'}.${ext}`;
+    await ff.writeFile(inputName, await fetchFile(currentFile));
 
-    // Process each variant sequentially
     for (let i = 0; i < variantCount; i++) {
       setVariants((prev) => prev.map((v) => v.index === i ? { ...v, status: 'processing' } : v));
-
-      // Scroll into view on first variant
       if (i === 0) setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
 
       try {
         const params = generateParams(quality, isImage ? false : vowbMode, isImage ? powbMode : false);
-        const outputName = `variant_${i + 1}_${Math.random().toString(36).slice(2, 10)}.${outExt}`;
+        const outputName = `v${i + 1}_${Math.random().toString(36).slice(2, 8)}.${outExt}`;
+        const hasAudio = !isImage;
 
-        // Audio detection: attempt to check if file has audio (assume yes for video)
-        const hasAudio = !isImage && file.type.startsWith('video/');
-
-        // Track progress
-        ff.on('progress', ({ progress }: { progress: number }) => {
+        const onProgress = ({ progress }: { progress: number }) => {
           setVariants((prev) => prev.map((v) => v.index === i ? { ...v, ffmpegProgress: Math.max(0, Math.min(1, progress)) } : v));
-        });
+        };
+        ff.on('progress', onProgress);
+        await ff.exec(buildFFmpegArgs(inputName, outputName, params, isImage, hasAudio));
+        ff.off('progress', onProgress);
 
-        const args = buildFFmpegArgs(inputName, outputName, params, isImage, hasAudio);
-        await ff.exec(args);
-
-        // Read output
         const raw = await ff.readFile(outputName);
-        // @ffmpeg/ffmpeg readFile returns FileData = Uint8Array | string
-        // Cast through unknown to satisfy strict TS while keeping runtime correct
-        const blobParts: BlobPart[] = [raw as unknown as BlobPart];
-        const blob = new Blob(blobParts, { type: isImage ? 'image/jpeg' : 'video/mp4' });
-        const blobUrl = URL.createObjectURL(blob);
-
-        // Cleanup output file from virtual fs
+        const blob = new Blob([raw as unknown as BlobPart], { type: isImage ? 'image/jpeg' : 'video/mp4' });
         try { await ff.deleteFile(outputName); } catch { /* ok */ }
 
-        const summary = paramsToSummary(params);
         setVariants((prev) => prev.map((v) =>
-          v.index === i ? { ...v, status: 'done', blobUrl, filename: outputName, summary, ffmpegProgress: 1 } : v
+          v.index === i ? { ...v, status: 'done', blobUrl: URL.createObjectURL(blob), filename: outputName, summary: paramsToSummary(params), ffmpegProgress: 1 } : v
         ));
       } catch (err) {
         console.error(`Variant ${i} failed:`, err);
@@ -294,30 +333,16 @@ export default function Home() {
         ));
       }
     }
-
-    // Cleanup input
     try { await ff.deleteFile(inputName); } catch { /* ok */ }
     setIsProcessing(false);
   };
 
   const downloadVariant = (v: ClientVariant) => {
     if (!v.blobUrl || !v.filename) return;
-    const a = document.createElement('a');
-    a.href = v.blobUrl;
-    a.download = v.filename;
-    a.click();
+    const a = document.createElement('a'); a.href = v.blobUrl; a.download = v.filename; a.click();
   };
-
-  const downloadAll = async () => {
-    const done = visibleVariants.filter((v) => v.status === 'done' && v.blobUrl);
-    for (const v of done) downloadVariant(v);
-  };
-
-  const visibleVariants = variants.filter((v) => !deletedIdxs.has(v.index));
-  const doneCount = visibleVariants.filter((v) => v.status === 'done').length;
-  const totalActive = visibleVariants.length;
-  const progressPct = totalActive > 0 ? Math.round((doneCount / variantCount) * 100) : 0;
-  const allDone = variants.length > 0 && variants.every((v) => v.status === 'done' || v.status === 'error');
+  const downloadAll = (variants: ClientVariant[], deleted: Set<number>) =>
+    variants.filter((v) => !deleted.has(v.index) && v.status === 'done' && v.blobUrl).forEach(downloadVariant);
 
   return (
     <div className="min-h-screen" style={{ background: '#030308' }}>
@@ -338,7 +363,6 @@ export default function Home() {
           <p className="text-sm" style={{ color: '#4b5563' }}>
             Generate algorithmically unique variants · Bypass Meta's duplicate detection
           </p>
-          {/* FFmpeg status */}
           <div className="mt-2 flex justify-center">
             {ffmpegLoading && (
               <span className="text-[11px] flex items-center gap-1.5" style={{ color: '#6b7280' }}>
@@ -346,29 +370,33 @@ export default function Home() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                 </svg>
-                Loading video engine...
+                Loading engine...
               </span>
             )}
-            {ffmpegReady && (
-              <span className="text-[11px]" style={{ color: '#10b981' }}>● Engine ready</span>
-            )}
+            {ffmpegReady && <span className="text-[11px]" style={{ color: '#10b981' }}>● Engine ready</span>}
           </div>
         </div>
 
-        {/* Mode toggle */}
+        {/* Mode toggle — dots show activity on inactive tab */}
         <div className="flex justify-center mb-5">
           <div className="flex rounded-2xl p-1 gap-1" style={{ background: '#0d0d1e', border: '1px solid #1c1c3a' }}>
             {(['video', 'photo'] as FileMode[]).map((m) => {
-              const sel = fileMode === m;
+              const sel = activeMode === m;
+              const hasFile = m === 'video' ? !!videoFile : !!photoFile;
+              const proc = m === 'video' ? videoIsProcessing : photoIsProcessing;
               return (
                 <button key={m} onClick={() => switchMode(m)}
-                  className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200"
+                  className="relative px-6 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200"
                   style={{
                     background: sel ? 'linear-gradient(135deg,#7c3aed,#4f46e5)' : 'transparent',
                     color: sel ? 'white' : '#6b7280',
                     boxShadow: sel ? '0 2px 15px rgba(124,58,237,0.35)' : 'none',
                   }}>
                   {m === 'video' ? '🎬  Video' : '🖼️  Photo'}
+                  {!sel && (hasFile || proc) && (
+                    <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full"
+                      style={{ background: proc ? '#f59e0b' : '#10b981' }} />
+                  )}
                 </button>
               );
             })}
@@ -385,39 +413,40 @@ export default function Home() {
           onClick={() => fileInputRef.current?.click()}
         >
           <input ref={fileInputRef} type="file" accept={acceptAttr} className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }} />
 
           {file ? (
             <div className="p-4 flex items-center gap-4">
-              {previewUrl && fileMode === 'video' && (
+              {previewUrl && activeMode === 'video' && (
                 <video src={previewUrl} className="w-20 h-14 rounded-xl object-cover flex-shrink-0 border" style={{ borderColor: '#2d1b69' }} muted playsInline />
               )}
-              {previewUrl && fileMode === 'photo' && (
+              {previewUrl && activeMode === 'photo' && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={previewUrl} alt="" className="w-20 h-14 rounded-xl object-cover flex-shrink-0 border" style={{ borderColor: '#2d1b69' }} />
               )}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold truncate" style={{ color: '#e2e8f0' }}>{file.name}</p>
                 <p className="text-xs mt-0.5" style={{ color: '#4b5563' }}>
-                  {fileMode === 'video' ? '🎬 Video' : '🖼️ Photo'} · {fmtBytes(file.size)}
+                  {activeMode === 'video' ? '🎬 Video' : '🖼️ Photo'} · {fmtBytes(file.size)}
                 </p>
               </div>
-              <button onClick={(e) => { e.stopPropagation(); setFile(null); setPreviewUrl(null); setVariants([]); }}
-                className="text-xs px-3 py-1.5 rounded-lg border shrink-0"
+              <button onClick={(e) => {
+                e.stopPropagation();
+                if (activeMode === 'video') { setVideoFile(null); setVideoPreviewUrl(null); setVideoVariants([]); }
+                else { setPhotoFile(null); setPhotoPreviewUrl(null); setPhotoVariants([]); }
+              }} className="text-xs px-3 py-1.5 rounded-lg border shrink-0"
                 style={{ borderColor: '#2d2d5a', color: '#6b7280' }}>Change</button>
             </div>
           ) : (
             <div className="py-12 flex flex-col items-center gap-3">
               <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl"
                 style={{ background: '#0e0e22', border: '1px solid #1a1a32' }}>
-                {isDragging ? '✨' : fileMode === 'video' ? '🎬' : '🖼️'}
+                {isDragging ? '✨' : activeMode === 'video' ? '🎬' : '🖼️'}
               </div>
               <div className="text-center">
-                <p className="font-semibold" style={{ color: '#d1d5db' }}>
-                  Drop your {fileMode === 'video' ? 'video' : 'photo'} here
-                </p>
+                <p className="font-semibold" style={{ color: '#d1d5db' }}>Drop your {activeMode === 'video' ? 'video' : 'photo'} here</p>
                 <p className="text-sm mt-1" style={{ color: '#374151' }}>
-                  {fileMode === 'video' ? 'MP4 · MOV · AVI · WEBM' : 'JPG · PNG · WEBP'} · Max 500MB
+                  {activeMode === 'video' ? 'MP4 · MOV · AVI · WEBM' : 'JPG · PNG · WEBP'} · Max 500MB
                 </p>
               </div>
             </div>
@@ -425,33 +454,24 @@ export default function Home() {
         </div>
 
         {/* VOWB toggle — video mode only */}
-        {fileMode === 'video' && (
+        {activeMode === 'video' && (
           <div className="mb-5">
-            <button
-              onClick={() => setVowbMode((v) => !v)}
+            <button onClick={() => setVowbMode((v) => !v)}
               className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all duration-200"
               style={{
                 background: vowbMode ? 'rgba(255,255,255,0.05)' : '#09091a',
                 borderColor: vowbMode ? 'rgba(255,255,255,0.3)' : '#1a1a32',
                 boxShadow: vowbMode ? '0 0 20px rgba(255,255,255,0.08)' : 'none',
-              }}
-            >
+              }}>
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
-                  style={{ background: vowbMode ? 'white' : '#0f0f25', border: `1px solid ${vowbMode ? 'white' : '#2d2d5a'}` }}>
-                  🤍
-                </div>
+                  style={{ background: vowbMode ? 'white' : '#0f0f25', border: `1px solid ${vowbMode ? 'white' : '#2d2d5a'}` }}>🤍</div>
                 <div className="text-left">
-                  <p className="text-sm font-bold" style={{ color: vowbMode ? 'white' : '#9ca3af' }}>
-                    VOWB Edit
-                  </p>
-                  <p className="text-[11px]" style={{ color: vowbMode ? '#d1d5db' : '#374151' }}>
-                    Video on white background · caption space at bottom
-                  </p>
+                  <p className="text-sm font-bold" style={{ color: vowbMode ? 'white' : '#9ca3af' }}>VOWB Edit</p>
+                  <p className="text-[11px]" style={{ color: vowbMode ? '#d1d5db' : '#374151' }}>Video on white background · caption space at bottom</p>
                 </div>
               </div>
-              <div className="relative w-11 h-6 rounded-full flex-shrink-0 transition-all duration-200"
-                style={{ background: vowbMode ? 'white' : '#1a1a32' }}>
+              <div className="relative w-11 h-6 rounded-full flex-shrink-0 transition-all duration-200" style={{ background: vowbMode ? 'white' : '#1a1a32' }}>
                 <div className="absolute top-0.5 w-5 h-5 rounded-full shadow transition-all duration-200"
                   style={{ background: vowbMode ? '#7c3aed' : '#4b5563', left: vowbMode ? '22px' : '2px' }} />
               </div>
@@ -460,33 +480,24 @@ export default function Home() {
         )}
 
         {/* POWB toggle — photo mode only */}
-        {fileMode === 'photo' && (
+        {activeMode === 'photo' && (
           <div className="mb-5">
-            <button
-              onClick={() => setPowbMode((v) => !v)}
+            <button onClick={() => setPowbMode((v) => !v)}
               className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all duration-200"
               style={{
                 background: powbMode ? 'rgba(255,255,255,0.05)' : '#09091a',
                 borderColor: powbMode ? 'rgba(255,255,255,0.3)' : '#1a1a32',
                 boxShadow: powbMode ? '0 0 20px rgba(255,255,255,0.08)' : 'none',
-              }}
-            >
+              }}>
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
-                  style={{ background: powbMode ? 'white' : '#0f0f25', border: `1px solid ${powbMode ? 'white' : '#2d2d5a'}` }}>
-                  🤍
-                </div>
+                  style={{ background: powbMode ? 'white' : '#0f0f25', border: `1px solid ${powbMode ? 'white' : '#2d2d5a'}` }}>🤍</div>
                 <div className="text-left">
-                  <p className="text-sm font-bold" style={{ color: powbMode ? 'white' : '#9ca3af' }}>
-                    POWB Edit
-                  </p>
-                  <p className="text-[11px]" style={{ color: powbMode ? '#d1d5db' : '#374151' }}>
-                    Picture on white background · caption space at bottom
-                  </p>
+                  <p className="text-sm font-bold" style={{ color: powbMode ? 'white' : '#9ca3af' }}>POWB Edit</p>
+                  <p className="text-[11px]" style={{ color: powbMode ? '#d1d5db' : '#374151' }}>Picture on white background · caption space at bottom</p>
                 </div>
               </div>
-              <div className="relative w-11 h-6 rounded-full flex-shrink-0 transition-all duration-200"
-                style={{ background: powbMode ? 'white' : '#1a1a32' }}>
+              <div className="relative w-11 h-6 rounded-full flex-shrink-0 transition-all duration-200" style={{ background: powbMode ? 'white' : '#1a1a32' }}>
                 <div className="absolute top-0.5 w-5 h-5 rounded-full shadow transition-all duration-200"
                   style={{ background: powbMode ? '#7c3aed' : '#4b5563', left: powbMode ? '22px' : '2px' }} />
               </div>
@@ -537,9 +548,7 @@ export default function Home() {
                 onChange={(e) => { const n = parseInt(e.target.value); if (!isNaN(n)) setVariantCount(Math.min(50, Math.max(1, n))); }}
                 className="text-3xl font-black text-center bg-transparent border-none outline-none w-16 gradient-text"
                 style={{ fontFamily: 'Inter,sans-serif' }} />
-              <span className="text-sm" style={{ color: '#374151' }}>
-                unique variant{variantCount !== 1 ? 's' : ''}
-              </span>
+              <span className="text-sm" style={{ color: '#374151' }}>unique variant{variantCount !== 1 ? 's' : ''}</span>
             </div>
             <button onClick={() => setVariantCount((v) => Math.min(50, v + 1))}
               className="w-9 h-9 rounded-xl flex items-center justify-center text-lg font-bold flex-shrink-0"
@@ -565,52 +574,23 @@ export default function Home() {
             : `⚡  Create ${variantCount} Variant${variantCount !== 1 ? 's' : ''}`}
         </button>
 
-        {/* Progress bar */}
-        {variants.length > 0 && (
-          <div className="mt-5">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-xs font-medium" style={{ color: allDone ? '#10b981' : '#7c3aed' }}>
-                {allDone
-                  ? `✅ ${doneCount} variant${doneCount !== 1 ? 's' : ''} ready`
-                  : `Editing variant ${doneCount + 1} of ${variantCount}...`}
-              </span>
-              <span className="text-xs font-bold tabular-nums" style={{ color: allDone ? '#10b981' : '#7c3aed' }}>{progressPct}%</span>
-            </div>
-            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: '#1a1a32' }}>
-              <div className="h-full rounded-full transition-all duration-500"
-                style={{ width: `${progressPct}%`, background: allDone ? 'linear-gradient(90deg,#10b981,#34d399)' : 'linear-gradient(90deg,#7c3aed,#a78bfa)' }} />
-            </div>
-          </div>
-        )}
-
-        {/* Results */}
-        {visibleVariants.length > 0 && (
-          <div ref={resultsRef} className="mt-8">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: '#374151' }}>
-                Results
-                {doneCount > 0 && <span className="ml-2 font-black" style={{ color: '#7c3aed' }}>{doneCount}/{variantCount}</span>}
-              </p>
-              {doneCount > 1 && (
-                <button onClick={downloadAll}
-                  className="text-xs px-3 py-1.5 rounded-xl font-semibold"
-                  style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.3)', color: '#a78bfa' }}>
-                  ⬇ Download All
-                </button>
-              )}
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {visibleVariants.map((v) => (
-                <VariantCard
-                  key={v.index}
-                  v={v}
-                  onDelete={() => setDeletedIdxs((prev) => new Set([...prev, v.index]))}
-                  onDownload={() => downloadVariant(v)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Results — both modes shown independently, always visible */}
+        <ResultsSection
+          label="Video Results" icon="🎬"
+          variants={videoVariants} deletedIdxs={videoDeletedIdxs} isProcessing={videoIsProcessing}
+          onDelete={(idx) => setVideoDeletedIdxs((p) => new Set([...p, idx]))}
+          onDownload={downloadVariant}
+          onDownloadAll={() => downloadAll(videoVariants, videoDeletedIdxs)}
+          resultsRef={videoResultsRef}
+        />
+        <ResultsSection
+          label="Photo Results" icon="🖼️"
+          variants={photoVariants} deletedIdxs={photoDeletedIdxs} isProcessing={photoIsProcessing}
+          onDelete={(idx) => setPhotoDeletedIdxs((p) => new Set([...p, idx]))}
+          onDownload={downloadVariant}
+          onDownloadAll={() => downloadAll(photoVariants, photoDeletedIdxs)}
+          resultsRef={photoResultsRef}
+        />
 
         <p className="text-center mt-10 text-xs" style={{ color: '#1f2937' }}>
           Nevra Editor · Processing runs entirely in your browser
