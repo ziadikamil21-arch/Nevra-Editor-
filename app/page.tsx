@@ -5,6 +5,7 @@ import {
   generateParams, paramsToSummary, buildFFmpegArgs,
   type Quality, type ClientVariant,
 } from '@/lib/client-processor';
+import { processImageWithCanvas } from '@/lib/canvas-image-processor';
 
 type FileMode = 'video' | 'photo';
 
@@ -215,9 +216,8 @@ export default function Home() {
   const [ffmpegReady, setFfmpegReady] = useState(false);
   const [ffmpegLoading, setFfmpegLoading] = useState(false);
 
-  // Two independent FFmpeg instances — video and photo run in parallel
+  // One FFmpeg instance for videos — photos use Canvas API (no WASM needed)
   const ffVideoRef = useRef<import('@ffmpeg/ffmpeg').FFmpeg | null>(null);
-  const ffPhotoRef = useRef<import('@ffmpeg/ffmpeg').FFmpeg | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoResultsRef = useRef<HTMLDivElement>(null);
   const photoResultsRef = useRef<HTMLDivElement>(null);
@@ -243,12 +243,9 @@ export default function Home() {
           toBlobURL(`${base}/ffmpeg-core.js`, 'text/javascript'),
           toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
         ]);
-        const makeFF = async () => {
-          const ff = new FFmpeg();
-          await ff.load({ coreURL, wasmURL });
-          return ff;
-        };
-        [ffVideoRef.current, ffPhotoRef.current] = await Promise.all([makeFF(), makeFF()]);
+        const ff = new FFmpeg();
+        await ff.load({ coreURL, wasmURL });
+        ffVideoRef.current = ff;
         setFfmpegReady(true);
       } catch (e) {
         console.error('FFmpeg load failed', e);
@@ -281,12 +278,11 @@ export default function Home() {
 
   const handleCreate = async () => {
     const isImage = activeMode === 'photo';
-    const ff = isImage ? ffPhotoRef.current : ffVideoRef.current;
     const currentFile = isImage ? photoFile : videoFile;
-    if (!currentFile || !ff || (isImage ? photoIsProcessing : videoIsProcessing)) return;
+    const currentIsProcessing = isImage ? photoIsProcessing : videoIsProcessing;
+    if (!currentFile || currentIsProcessing) return;
+    if (!isImage && !ffmpegReady) return; // video needs FFmpeg
 
-    const ext = currentFile.name.split('.').pop()?.toLowerCase() ?? (isImage ? 'jpg' : 'mp4');
-    const outExt = isImage ? 'png' : 'mp4'; // PNG: stable WASM encoder (mjpeg crashes)
     const setVariants = isImage ? setPhotoVariants : setVideoVariants;
     const setDeletedIdxs = isImage ? setPhotoDeletedIdxs : setVideoDeletedIdxs;
     const setIsProcessing = isImage ? setPhotoIsProcessing : setVideoIsProcessing;
@@ -299,35 +295,57 @@ export default function Home() {
       index: i, status: 'pending', ffmpegProgress: 0, blobUrl: null, filename: null, summary: null,
     })));
 
+    // ── PHOTO: Canvas API — no FFmpeg, no WASM, no crashes ──────────────────
+    if (isImage) {
+      for (let i = 0; i < variantCount; i++) {
+        setVariants((prev) => prev.map((v) => v.index === i ? { ...v, status: 'processing' } : v));
+        if (i === 0) setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+        try {
+          const params = generateParams(quality, false, powbMode, true);
+          const outputName = `photo_v${i + 1}_${Math.random().toString(36).slice(2, 8)}.png`;
+          const blob = await processImageWithCanvas(currentFile, params);
+          setVariants((prev) => prev.map((v) =>
+            v.index === i ? { ...v, status: 'done', blobUrl: URL.createObjectURL(blob), filename: outputName, summary: paramsToSummary(params), ffmpegProgress: 1 } : v
+          ));
+        } catch (err) {
+          console.error(`Photo variant ${i} failed:`, err);
+          setVariants((prev) => prev.map((v) =>
+            v.index === i ? { ...v, status: 'error', error: String(err) } : v
+          ));
+        }
+      }
+      setIsProcessing(false);
+      return;
+    }
+
+    // ── VIDEO: FFmpeg WASM ───────────────────────────────────────────────────
+    const ff = ffVideoRef.current!;
+    const ext = currentFile.name.split('.').pop()?.toLowerCase() ?? 'mp4';
+    const inputName = `input_v.${ext}`;
+
     const { fetchFile } = await import('@ffmpeg/util');
-    const inputName = `input_${isImage ? 'p' : 'v'}.${ext}`;
     await ff.writeFile(inputName, await fetchFile(currentFile));
 
     for (let i = 0; i < variantCount; i++) {
       setVariants((prev) => prev.map((v) => v.index === i ? { ...v, status: 'processing' } : v));
       if (i === 0) setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
-
       try {
-        const params = generateParams(quality, isImage ? false : vowbMode, isImage ? powbMode : false);
-        const outputName = `v${i + 1}_${Math.random().toString(36).slice(2, 8)}.${outExt}`;
-        const hasAudio = !isImage;
-
+        const params = generateParams(quality, vowbMode, false, false);
+        const outputName = `video_v${i + 1}_${Math.random().toString(36).slice(2, 8)}.mp4`;
         const onProgress = ({ progress }: { progress: number }) => {
           setVariants((prev) => prev.map((v) => v.index === i ? { ...v, ffmpegProgress: Math.max(0, Math.min(1, progress)) } : v));
         };
         ff.on('progress', onProgress);
-        await ff.exec(buildFFmpegArgs(inputName, outputName, params, isImage, hasAudio));
+        await ff.exec(buildFFmpegArgs(inputName, outputName, params, false, true));
         ff.off('progress', onProgress);
-
         const raw = await ff.readFile(outputName);
-        const blob = new Blob([raw as unknown as BlobPart], { type: isImage ? 'image/png' : 'video/mp4' });
+        const blob = new Blob([raw as unknown as BlobPart], { type: 'video/mp4' });
         try { await ff.deleteFile(outputName); } catch { /* ok */ }
-
         setVariants((prev) => prev.map((v) =>
           v.index === i ? { ...v, status: 'done', blobUrl: URL.createObjectURL(blob), filename: outputName, summary: paramsToSummary(params), ffmpegProgress: 1 } : v
         ));
       } catch (err) {
-        console.error(`Variant ${i} failed:`, err);
+        console.error(`Video variant ${i} failed:`, err);
         setVariants((prev) => prev.map((v) =>
           v.index === i ? { ...v, status: 'error', error: String(err) } : v
         ));
@@ -559,7 +577,7 @@ export default function Home() {
         {/* Create button */}
         <button
           className="btn-gradient w-full py-4 rounded-2xl font-bold text-base text-white tracking-widest uppercase"
-          disabled={!file || !ffmpegReady || isProcessing}
+          disabled={!file || (activeMode === 'video' && !ffmpegReady) || isProcessing}
           onClick={handleCreate}
         >
           {isProcessing ? (

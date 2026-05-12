@@ -30,7 +30,7 @@ export interface ClientVariant {
   error?: string;
 }
 
-interface TransformParams {
+export interface TransformParams {
   cropPx: number;
   zoomFactor: number;
   rotationRad: number;
@@ -56,7 +56,7 @@ function randStr(len = 12) {
   return Array.from({ length: len }, () => Math.floor(Math.random() * 36).toString(36)).join('');
 }
 
-export function generateParams(quality: Quality, vowb = false, powb = false): TransformParams {
+export function generateParams(quality: Quality, vowb = false, powb = false, isImage = false): TransformParams {
   const p: TransformParams = {
     cropPx: randInt(1, 2),
     zoomFactor: 1,
@@ -83,7 +83,7 @@ export function generateParams(quality: Quality, vowb = false, powb = false): Tr
 
   if (quality === 'max' || quality === 'pro') {
     p.cropPx = randInt(1, 3);
-    p.pitchRate = 1 + rand(0.005, 0.01);
+    if (!isImage) p.pitchRate = 1 + rand(0.005, 0.01); // audio only
     p.hueShift = rand(-4, 4);
     p.satFactor = 1 + rand(-0.03, 0.04);
     p.zoomFactor = 1 + rand(0.005, 0.012);
@@ -103,7 +103,7 @@ export function generateParams(quality: Quality, vowb = false, powb = false): Tr
   if (quality === 'pro') {
     p.cropPx = randInt(2, 4);
     p.rotationRad = rand(0.0017, 0.0087) * (Math.random() > 0.5 ? 1 : -1);
-    p.speedFactor = 1 + rand(0.005, 0.015);
+    if (!isImage) p.speedFactor = 1 + rand(0.005, 0.015); // audio/PTS only
     p.zoomFactor = 1 + rand(0.01, 0.02);
     p.hueShift = rand(-5, 5);
     p.mirror = Math.random() > 0.4; // 60% chance mirror in pro
