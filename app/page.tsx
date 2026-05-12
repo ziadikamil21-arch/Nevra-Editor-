@@ -471,8 +471,10 @@ export default function Home() {
   const [photoFolder, setPhotoFolder] = useState<NevraFolder | null>(null); // folder for current photo session
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [showSaveModeModal, setShowSaveModeModal] = useState(false);
+  const [saveModeTab, setSaveModeTab] = useState<'new' | 'existing'>('new');
   const [folderNameInput, setFolderNameInput] = useState('');
   const [savingFolder, setSavingFolder] = useState(false);
+  const [selectedExistingFolderId, setSelectedExistingFolderId] = useState<string | null>(null);
   const [showFolderBrowser, setShowFolderBrowser] = useState(false);
 
   const ffVideoRef = useRef<import('@ffmpeg/ffmpeg').FFmpeg | null>(null);
@@ -550,6 +552,8 @@ export default function Home() {
     if (!validateFile(f)) return;
     setPendingFile(f);
     setFolderNameInput('');
+    setSaveModeTab('new');
+    setSelectedExistingFolderId(null);
     setShowSaveModeModal(true);
   }, [validateFile]);
 
@@ -580,6 +584,18 @@ export default function Home() {
     } finally {
       setSavingFolder(false);
     }
+  };
+
+  const confirmExistingFolder = () => {
+    if (!selectedExistingFolderId || !pendingFile) return;
+    const folder = folders.find((f) => f.id === selectedExistingFolderId);
+    if (!folder) return;
+    if (pendingFile.type.startsWith('video/')) setVideoFolder(folder);
+    else setPhotoFolder(folder);
+    setShowSaveModeModal(false);
+    applyFile(pendingFile);
+    setPendingFile(null);
+    setSelectedExistingFolderId(null);
   };
 
   const switchMode = (mode: FileMode) => { setActiveMode(mode); setError(null); };
@@ -975,55 +991,118 @@ export default function Home() {
       </div>
 
       {/* ── Save Mode Modal ─────────────────────────────────────────────────── */}
-      {showSaveModeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4"
-          style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}>
-          <div className="w-full max-w-sm rounded-2xl border overflow-hidden"
-            style={{ background: '#0c0c1e', borderColor: '#2d2d5a', boxShadow: '0 0 60px rgba(124,58,237,0.3)' }}>
-            <div className="px-6 pt-6 pb-5">
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4"
-                style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)' }}>💾</div>
-              <p className="text-lg font-black text-center mb-1" style={{ color: '#f0f0ff' }}>How to save?</p>
-              <p className="text-xs text-center mb-5" style={{ color: '#4b5563' }}>
-                {pendingFile?.name}
-              </p>
+      {showSaveModeModal && (() => {
+        const pendingType = pendingFile?.type.startsWith('video/') ? 'video' : 'photo';
+        const compatibleFolders = folders.filter((f) => f.type === pendingType);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4"
+            style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}>
+            <div className="w-full max-w-sm rounded-2xl border overflow-hidden"
+              style={{ background: '#0c0c1e', borderColor: '#2d2d5a', boxShadow: '0 0 60px rgba(124,58,237,0.3)' }}>
+              <div className="px-6 pt-6 pb-5">
+                {/* Header */}
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4"
+                  style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)' }}>💾</div>
+                <p className="text-lg font-black text-center mb-1" style={{ color: '#f0f0ff' }}>How to save?</p>
+                <p className="text-xs text-center mb-5 truncate px-2" style={{ color: '#4b5563' }}>{pendingFile?.name}</p>
 
-              {/* Folder name input */}
-              <div className="mb-4">
-                <label className="text-xs font-bold uppercase tracking-widest mb-2 block" style={{ color: '#374151' }}>
-                  Folder name
-                </label>
-                <input
-                  autoFocus
-                  value={folderNameInput}
-                  onChange={(e) => setFolderNameInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && folderNameInput.trim()) confirmFolder(); }}
-                  className="w-full px-4 py-3 rounded-xl text-sm font-semibold bg-transparent outline-none"
-                  style={{ background: '#09091a', border: '1px solid #2d2d5a', color: '#f0f0ff' }}
-                  placeholder="ex: Summer Campaign, Collab Nike..." />
+                {/* Tabs: New Folder / Existing Folder */}
+                <div className="flex gap-2 mb-4">
+                  {(['new', 'existing'] as const).map((tab) => (
+                    <button key={tab} onClick={() => setSaveModeTab(tab)}
+                      className="flex-1 py-2 rounded-xl text-xs font-bold transition-all"
+                      style={{
+                        background: saveModeTab === tab ? 'rgba(124,58,237,0.2)' : '#09091a',
+                        border: `1px solid ${saveModeTab === tab ? '#7c3aed' : '#1a1a32'}`,
+                        color: saveModeTab === tab ? '#a78bfa' : '#4b5563',
+                      }}>
+                      {tab === 'new' ? '✨ New Folder' : `📂 Existing Folder${compatibleFolders.length > 0 ? ` (${compatibleFolders.length})` : ''}`}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Tab: New Folder */}
+                {saveModeTab === 'new' && (
+                  <>
+                    <div className="mb-4">
+                      <label className="text-xs font-bold uppercase tracking-widest mb-2 block" style={{ color: '#374151' }}>
+                        Folder name
+                      </label>
+                      <input
+                        autoFocus
+                        value={folderNameInput}
+                        onChange={(e) => setFolderNameInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && folderNameInput.trim()) confirmFolder(); }}
+                        className="w-full px-4 py-3 rounded-xl text-sm font-semibold bg-transparent outline-none"
+                        style={{ background: '#09091a', border: '1px solid #2d2d5a', color: '#f0f0ff' }}
+                        placeholder="ex: Summer Campaign, Collab Nike..." />
+                    </div>
+                    <button
+                      onClick={confirmFolder}
+                      disabled={!folderNameInput.trim() || savingFolder}
+                      className="w-full py-3 rounded-xl font-bold text-sm mb-2 transition-all"
+                      style={{
+                        background: folderNameInput.trim() ? 'linear-gradient(135deg,#7c3aed,#4f46e5)' : '#1a1a32',
+                        color: folderNameInput.trim() ? 'white' : '#374151',
+                        boxShadow: folderNameInput.trim() ? '0 0 20px rgba(124,58,237,0.35)' : 'none',
+                      }}>
+                      {savingFolder ? '...' : '📁 Create folder and continue'}
+                    </button>
+                  </>
+                )}
+
+                {/* Tab: Existing Folder */}
+                {saveModeTab === 'existing' && (
+                  <>
+                    {compatibleFolders.length === 0 ? (
+                      <div className="text-center py-6 mb-2">
+                        <p className="text-sm" style={{ color: '#4b5563' }}>No {pendingType} folders yet.</p>
+                        <p className="text-xs mt-1" style={{ color: '#1f2937' }}>Create a new folder first.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto mb-3 pr-0.5">
+                        {compatibleFolders.map((folder) => {
+                          const sel = selectedExistingFolderId === folder.id;
+                          return (
+                            <button key={folder.id} onClick={() => setSelectedExistingFolderId(folder.id)}
+                              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all"
+                              style={{
+                                background: sel ? 'rgba(124,58,237,0.15)' : '#09091a',
+                                border: `1px solid ${sel ? '#7c3aed' : '#1a1a32'}`,
+                              }}>
+                              <span className="text-lg flex-shrink-0">{folder.type === 'video' ? '🎬' : '🖼️'}</span>
+                              <span className="text-sm font-semibold flex-1 truncate" style={{ color: sel ? '#e2e8f0' : '#9ca3af' }}>{folder.name}</span>
+                              {sel && <span className="text-xs font-black flex-shrink-0" style={{ color: '#a78bfa' }}>✓</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <button
+                      onClick={confirmExistingFolder}
+                      disabled={!selectedExistingFolderId}
+                      className="w-full py-3 rounded-xl font-bold text-sm mb-2 transition-all"
+                      style={{
+                        background: selectedExistingFolderId ? 'linear-gradient(135deg,#7c3aed,#4f46e5)' : '#1a1a32',
+                        color: selectedExistingFolderId ? 'white' : '#374151',
+                        boxShadow: selectedExistingFolderId ? '0 0 20px rgba(124,58,237,0.35)' : 'none',
+                      }}>
+                      📂 Add to this folder
+                    </button>
+                  </>
+                )}
+
+                {/* Always: Generate Alone */}
+                <button onClick={confirmAlone}
+                  className="w-full py-2.5 rounded-xl font-semibold text-sm transition-all"
+                  style={{ background: '#09091a', border: '1px solid #1a1a32', color: '#6b7280' }}>
+                  ⚡ Generate Alone — no folder
+                </button>
               </div>
-
-              <button
-                onClick={confirmFolder}
-                disabled={!folderNameInput.trim() || savingFolder}
-                className="w-full py-3 rounded-xl font-bold text-sm mb-2 transition-all"
-                style={{
-                  background: folderNameInput.trim() ? 'linear-gradient(135deg,#7c3aed,#4f46e5)' : '#1a1a32',
-                  color: folderNameInput.trim() ? 'white' : '#374151',
-                  boxShadow: folderNameInput.trim() ? '0 0 20px rgba(124,58,237,0.35)' : 'none',
-                }}>
-                {savingFolder ? '...' : '📁 Create folder and continue'}
-              </button>
-
-              <button onClick={confirmAlone}
-                className="w-full py-2.5 rounded-xl font-semibold text-sm transition-all"
-                style={{ background: '#09091a', border: '1px solid #1a1a32', color: '#6b7280' }}>
-                ⚡ Generate Alone — no folder
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Mirror Modal ────────────────────────────────────────────────────── */}
       {showMirrorModal && (
