@@ -445,6 +445,7 @@ export default function Home() {
   const [videoDeletedIdxs, setVideoDeletedIdxs] = useState<Set<number>>(new Set());
   const [videoIsProcessing, setVideoIsProcessing] = useState(false);
   const [vowbMode, setVowbMode] = useState(false);
+  const [vowbCount, setVowbCount] = useState(1);
 
   // Photo state
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -453,6 +454,7 @@ export default function Home() {
   const [photoDeletedIdxs, setPhotoDeletedIdxs] = useState<Set<number>>(new Set());
   const [photoIsProcessing, setPhotoIsProcessing] = useState(false);
   const [powbMode, setPowbMode] = useState(false);
+  const [powbCount, setPowbCount] = useState(1);
 
   // Shared
   const [quality, setQuality] = useState<Quality>('max');
@@ -516,6 +518,12 @@ export default function Home() {
   useEffect(() => {
     loadFolders().then(setFolders).catch(console.error);
   }, []);
+
+  // Clamp WB counts when variantCount changes
+  useEffect(() => {
+    setVowbCount((c) => Math.min(c, variantCount));
+    setPowbCount((c) => Math.min(c, variantCount));
+  }, [variantCount]);
 
   // ── File handling: show save-mode modal on drop ────────────────────────────
   const validateFile = useCallback((f: File): boolean => {
@@ -597,7 +605,8 @@ export default function Home() {
         setVariants((prev) => prev.map((v) => v.index === i ? { ...v, status: 'processing' } : v));
         if (i === 0) setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
         try {
-          const params = generateParams(quality, false, powbMode, true);
+          const usePowb = powbMode && i < powbCount;
+          const params = generateParams(quality, false, usePowb, true);
           const outputName = `photo_v${i + 1}_${Math.random().toString(36).slice(2, 8)}.png`;
           const blob = await processImageWithCanvas(currentFile, params);
           const summary = paramsToSummary(params);
@@ -627,7 +636,8 @@ export default function Home() {
       setVariants((prev) => prev.map((v) => v.index === i ? { ...v, status: 'processing' } : v));
       if (i === 0) setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
       try {
-        const params = generateParams(quality, vowbMode, false, false);
+        const useVowb = vowbMode && i < vowbCount;
+        const params = generateParams(quality, useVowb, false, false);
         if (mirrorChoice !== undefined) params.mirror = mirrorChoice;
         const outputName = `video_v${i + 1}_${Math.random().toString(36).slice(2, 8)}.mp4`;
         const onProgress = ({ progress }: { progress: number }) => {
@@ -780,42 +790,80 @@ export default function Home() {
         {/* VOWB toggle */}
         {activeMode === 'video' && (
           <div className="mb-5">
-            <button onClick={() => setVowbMode((v) => !v)}
-              className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all duration-200"
+            <div className="rounded-2xl border overflow-hidden transition-all duration-200"
               style={{ background: vowbMode ? 'rgba(255,255,255,0.05)' : '#09091a', borderColor: vowbMode ? 'rgba(255,255,255,0.3)' : '#1a1a32', boxShadow: vowbMode ? '0 0 20px rgba(255,255,255,0.08)' : 'none' }}>
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
-                  style={{ background: vowbMode ? 'white' : '#0f0f25', border: `1px solid ${vowbMode ? 'white' : '#2d2d5a'}` }}>🤍</div>
-                <div className="text-left">
-                  <p className="text-sm font-bold" style={{ color: vowbMode ? 'white' : '#9ca3af' }}>VOWB Edit</p>
-                  <p className="text-[11px]" style={{ color: vowbMode ? '#d1d5db' : '#374151' }}>Video on white background · caption space at bottom</p>
+              <button onClick={() => setVowbMode((v) => !v)}
+                className="w-full flex items-center justify-between px-4 py-3 transition-all duration-200">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
+                    style={{ background: vowbMode ? 'white' : '#0f0f25', border: `1px solid ${vowbMode ? 'white' : '#2d2d5a'}` }}>🤍</div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold" style={{ color: vowbMode ? 'white' : '#9ca3af' }}>VOWB Edit</p>
+                    <p className="text-[11px]" style={{ color: vowbMode ? '#d1d5db' : '#374151' }}>Video on white background · caption space at bottom</p>
+                  </div>
                 </div>
-              </div>
-              <div className="relative w-11 h-6 rounded-full flex-shrink-0 transition-all duration-200" style={{ background: vowbMode ? 'white' : '#1a1a32' }}>
-                <div className="absolute top-0.5 w-5 h-5 rounded-full shadow transition-all duration-200" style={{ background: vowbMode ? '#7c3aed' : '#4b5563', left: vowbMode ? '22px' : '2px' }} />
-              </div>
-            </button>
+                <div className="relative w-11 h-6 rounded-full flex-shrink-0 transition-all duration-200" style={{ background: vowbMode ? 'white' : '#1a1a32' }}>
+                  <div className="absolute top-0.5 w-5 h-5 rounded-full shadow transition-all duration-200" style={{ background: vowbMode ? '#7c3aed' : '#4b5563', left: vowbMode ? '22px' : '2px' }} />
+                </div>
+              </button>
+              {vowbMode && (
+                <div className="px-4 pb-3 flex items-center justify-between gap-3"
+                  style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                  <p className="text-xs font-semibold" style={{ color: '#d1d5db' }}>
+                    Apply VOWB to <span className="font-black" style={{ color: 'white' }}>{vowbCount}</span> of <span className="font-black" style={{ color: 'white' }}>{variantCount}</span> variant{variantCount !== 1 ? 's' : ''}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setVowbCount((c) => Math.max(1, c - 1))}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-sm transition-all hover:scale-110"
+                      style={{ background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid rgba(255,255,255,0.2)' }}>−</button>
+                    <span className="w-6 text-center font-black text-sm" style={{ color: 'white' }}>{vowbCount}</span>
+                    <button onClick={() => setVowbCount((c) => Math.min(variantCount, c + 1))}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-sm transition-all hover:scale-110"
+                      style={{ background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid rgba(255,255,255,0.2)' }}>+</button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
         {/* POWB toggle */}
         {activeMode === 'photo' && (
           <div className="mb-5">
-            <button onClick={() => setPowbMode((v) => !v)}
-              className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all duration-200"
+            <div className="rounded-2xl border overflow-hidden transition-all duration-200"
               style={{ background: powbMode ? 'rgba(255,255,255,0.05)' : '#09091a', borderColor: powbMode ? 'rgba(255,255,255,0.3)' : '#1a1a32', boxShadow: powbMode ? '0 0 20px rgba(255,255,255,0.08)' : 'none' }}>
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
-                  style={{ background: powbMode ? 'white' : '#0f0f25', border: `1px solid ${powbMode ? 'white' : '#2d2d5a'}` }}>🤍</div>
-                <div className="text-left">
-                  <p className="text-sm font-bold" style={{ color: powbMode ? 'white' : '#9ca3af' }}>POWB Edit</p>
-                  <p className="text-[11px]" style={{ color: powbMode ? '#d1d5db' : '#374151' }}>Picture on white background · caption space at bottom</p>
+              <button onClick={() => setPowbMode((v) => !v)}
+                className="w-full flex items-center justify-between px-4 py-3 transition-all duration-200">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
+                    style={{ background: powbMode ? 'white' : '#0f0f25', border: `1px solid ${powbMode ? 'white' : '#2d2d5a'}` }}>🤍</div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold" style={{ color: powbMode ? 'white' : '#9ca3af' }}>POWB Edit</p>
+                    <p className="text-[11px]" style={{ color: powbMode ? '#d1d5db' : '#374151' }}>Picture on white background · caption space at bottom</p>
+                  </div>
                 </div>
-              </div>
-              <div className="relative w-11 h-6 rounded-full flex-shrink-0 transition-all duration-200" style={{ background: powbMode ? 'white' : '#1a1a32' }}>
-                <div className="absolute top-0.5 w-5 h-5 rounded-full shadow transition-all duration-200" style={{ background: powbMode ? '#7c3aed' : '#4b5563', left: powbMode ? '22px' : '2px' }} />
-              </div>
-            </button>
+                <div className="relative w-11 h-6 rounded-full flex-shrink-0 transition-all duration-200" style={{ background: powbMode ? 'white' : '#1a1a32' }}>
+                  <div className="absolute top-0.5 w-5 h-5 rounded-full shadow transition-all duration-200" style={{ background: powbMode ? '#7c3aed' : '#4b5563', left: powbMode ? '22px' : '2px' }} />
+                </div>
+              </button>
+              {powbMode && (
+                <div className="px-4 pb-3 flex items-center justify-between gap-3"
+                  style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                  <p className="text-xs font-semibold" style={{ color: '#d1d5db' }}>
+                    Apply POWB to <span className="font-black" style={{ color: 'white' }}>{powbCount}</span> of <span className="font-black" style={{ color: 'white' }}>{variantCount}</span> variant{variantCount !== 1 ? 's' : ''}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setPowbCount((c) => Math.max(1, c - 1))}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-sm transition-all hover:scale-110"
+                      style={{ background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid rgba(255,255,255,0.2)' }}>−</button>
+                    <span className="w-6 text-center font-black text-sm" style={{ color: 'white' }}>{powbCount}</span>
+                    <button onClick={() => setPowbCount((c) => Math.min(variantCount, c + 1))}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-sm transition-all hover:scale-110"
+                      style={{ background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid rgba(255,255,255,0.2)' }}>+</button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
