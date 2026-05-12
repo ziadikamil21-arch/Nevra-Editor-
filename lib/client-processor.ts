@@ -16,6 +16,7 @@ export interface TransformSummary {
   warmth: 'warm' | 'cold' | 'neutral';
   warmthStrength: number;
   invisibleText: boolean;
+  vowb: boolean;
 }
 
 export interface ClientVariant {
@@ -42,6 +43,7 @@ interface TransformParams {
   warmth: 'warm' | 'cold' | 'neutral';
   warmthStrength: number;
   invisibleText: boolean;
+  vowb: boolean;
   metadata: Record<string, string>;
 }
 
@@ -51,7 +53,7 @@ function randStr(len = 12) {
   return Array.from({ length: len }, () => Math.floor(Math.random() * 36).toString(36)).join('');
 }
 
-export function generateParams(quality: Quality): TransformParams {
+export function generateParams(quality: Quality, vowb = false): TransformParams {
   const p: TransformParams = {
     cropPx: randInt(1, 2),
     zoomFactor: 1,
@@ -66,6 +68,7 @@ export function generateParams(quality: Quality): TransformParams {
     warmth: 'neutral',
     warmthStrength: 0,
     invisibleText: false,
+    vowb,
     metadata: {
       title: randStr(16),
       comment: randStr(20),
@@ -120,11 +123,20 @@ export function paramsToSummary(p: TransformParams): TransformSummary {
     warmth: p.warmth,
     warmthStrength: parseFloat((p.warmthStrength * 100).toFixed(1)),
     invisibleText: p.invisibleText,
+    vowb: p.vowb,
   };
 }
 
 export function buildVideoFilters(p: TransformParams): string {
   const vf: string[] = [];
+
+  // 0. VOWB — place video on white background with caption space at bottom
+  if (p.vowb) {
+    // Scale video to 86% of its size, center it on original-size white canvas
+    // Add ~200px white space at bottom for caption
+    vf.push('scale=trunc(iw*0.86/2)*2:trunc(ih*0.86/2)*2');
+    vf.push('pad=trunc(iw/0.86/2)*2:trunc((ih/0.86+200)/2)*2:(ow-iw)/2:trunc(ih*0.07):white');
+  }
 
   // 1. Crop + rescale
   const c = p.cropPx;

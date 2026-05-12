@@ -95,6 +95,7 @@ function VariantCard({
           <p className="text-[10px] font-bold uppercase tracking-widest px-1 mb-2" style={{ color: '#374151' }}>
             Applied Transformations
           </p>
+          {s.vowb && <TransformRow icon="🤍" label="White background" value="VOWB Edit" color="#f1f5f9" />}
           <TransformRow icon="✂️" label="Crop" value={`${s.cropPx}px each edge`} color="#94a3b8" />
           <TransformRow icon="📊" label="Bitrate" value={`${s.bitrate.toLocaleString()}k`} color="#94a3b8" />
           {s.zoomPct > 0 && <TransformRow icon="🔍" label="Zoom" value={`+${s.zoomPct.toFixed(2)}%`} color="#38bdf8" />}
@@ -161,6 +162,7 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [vowbMode, setVowbMode] = useState(false);
   const [ffmpegReady, setFfmpegReady] = useState(false);
   const [ffmpegLoading, setFfmpegLoading] = useState(false);
   const [variants, setVariants] = useState<ClientVariant[]>([]);
@@ -220,6 +222,7 @@ export default function Home() {
     setVariants([]);
     setDeletedIdxs(new Set());
     setError(null);
+    if (mode === 'photo') setVowbMode(false);
   };
 
   const handleCreate = async () => {
@@ -252,7 +255,7 @@ export default function Home() {
       if (i === 0) setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
 
       try {
-        const params = generateParams(quality);
+        const params = generateParams(quality, vowbMode);
         const outputName = `variant_${i + 1}_${Math.random().toString(36).slice(2, 10)}.${outExt}`;
 
         // Audio detection: attempt to check if file has audio (assume yes for video)
@@ -417,6 +420,45 @@ export default function Home() {
             </div>
           )}
         </div>
+
+        {/* VOWB toggle — video mode only */}
+        {fileMode === 'video' && (
+          <div className="mb-5">
+            <button
+              onClick={() => setVowbMode((v) => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all duration-200"
+              style={{
+                background: vowbMode ? 'rgba(255,255,255,0.05)' : '#09091a',
+                borderColor: vowbMode ? 'rgba(255,255,255,0.3)' : '#1a1a32',
+                boxShadow: vowbMode ? '0 0 20px rgba(255,255,255,0.08)' : 'none',
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
+                  style={{ background: vowbMode ? 'white' : '#0f0f25', border: `1px solid ${vowbMode ? 'white' : '#2d2d5a'}` }}>
+                  🤍
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-bold" style={{ color: vowbMode ? 'white' : '#9ca3af' }}>
+                    VOWB Edit
+                  </p>
+                  <p className="text-[11px]" style={{ color: vowbMode ? '#d1d5db' : '#374151' }}>
+                    Video on white background · caption space at bottom
+                  </p>
+                </div>
+              </div>
+              {/* Toggle switch */}
+              <div className="relative w-11 h-6 rounded-full flex-shrink-0 transition-all duration-200"
+                style={{ background: vowbMode ? 'white' : '#1a1a32' }}>
+                <div className="absolute top-0.5 w-5 h-5 rounded-full shadow transition-all duration-200"
+                  style={{
+                    background: vowbMode ? '#7c3aed' : '#4b5563',
+                    left: vowbMode ? '22px' : '2px',
+                  }} />
+              </div>
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 px-4 py-3 rounded-xl text-sm" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#fca5a5' }}>
