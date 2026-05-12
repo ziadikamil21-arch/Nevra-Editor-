@@ -538,10 +538,10 @@ export default function Home() {
   const applyFile = useCallback((f: File) => {
     setError(null);
     if (activeMode === 'video') {
-      setVideoFile(f); setVideoVariants([]); setVideoDeletedIdxs(new Set()); setVideoFolder(null);
+      setVideoFile(f); setVideoVariants([]); setVideoDeletedIdxs(new Set());
       setVideoPreviewUrl(URL.createObjectURL(f));
     } else {
-      setPhotoFile(f); setPhotoVariants([]); setPhotoDeletedIdxs(new Set()); setPhotoFolder(null);
+      setPhotoFile(f); setPhotoVariants([]); setPhotoDeletedIdxs(new Set());
       setPhotoPreviewUrl(URL.createObjectURL(f));
     }
   }, [activeMode]);
@@ -555,7 +555,13 @@ export default function Home() {
 
   const confirmAlone = () => {
     setShowSaveModeModal(false);
-    if (pendingFile) { applyFile(pendingFile); setPendingFile(null); }
+    // No folder — explicitly clear any previously set folder for this mode
+    if (pendingFile) {
+      if (pendingFile.type.startsWith('video/')) setVideoFolder(null);
+      else setPhotoFolder(null);
+      applyFile(pendingFile);
+      setPendingFile(null);
+    }
   };
 
   const confirmFolder = async () => {
