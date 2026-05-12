@@ -39,7 +39,7 @@ function fmtBytes(b: number) {
   return b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
 }
 function fmtDate(ts: number) {
-  return new Date(ts).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return new Date(ts).toLocaleDateString('en-US', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
 function TransformRow({ icon, label, value, color }: { icon: string; label: string; value: string; color?: string }) {
@@ -242,7 +242,7 @@ function FolderBrowser({ folders, onClose, onFoldersChange }: {
   };
 
   const handleDeleteFolder = async (folderId: string) => {
-    if (!confirm('Supprimer ce dossier et toutes ses variantes ?')) return;
+    if (!confirm('Delete this folder and all its variants?')) return;
     await deleteFolder(folderId);
     const updated = folders.filter((f) => f.id !== folderId);
     onFoldersChange(updated);
@@ -287,12 +287,12 @@ function FolderBrowser({ folders, onClose, onFoldersChange }: {
               )}
               <div>
                 <h2 className="text-lg font-black" style={{ color: '#f0f0ff' }}>
-                  {openFolder_ ? openFolder_.name : '📁 Mes Dossiers'}
+                  {openFolder_ ? openFolder_.name : '📁 My Folders'}
                 </h2>
                 <p className="text-xs" style={{ color: '#4b5563' }}>
                   {openFolder_
-                    ? `${folderVariants.length} variante${folderVariants.length !== 1 ? 's' : ''} · ${openFolder_.type === 'video' ? '🎬 Vidéo' : '🖼️ Photo'}`
-                    : `${folders.length} dossier${folders.length !== 1 ? 's' : ''}`}
+                    ? `${folderVariants.length} variant${folderVariants.length !== 1 ? 's' : ''} · ${openFolder_.type === 'video' ? '🎬 Video' : '🖼️ Photo'}`
+                    : `${folders.length} folder${folders.length !== 1 ? 's' : ''}`}
                 </p>
               </div>
             </div>
@@ -301,14 +301,14 @@ function FolderBrowser({ folders, onClose, onFoldersChange }: {
                 <button onClick={() => { setRenamingId(openFolderId!); setRenameVal(openFolder_.name); }}
                   className="text-xs px-3 py-1.5 rounded-xl font-semibold"
                   style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#9ca3af' }}>
-                  ✏️ Renommer
+                  ✏️ Rename
                 </button>
               )}
               {openFolder_ && (
                 <button onClick={() => handleDeleteFolder(openFolderId!)}
                   className="text-xs px-3 py-1.5 rounded-xl font-semibold"
                   style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171' }}>
-                  🗑 Supprimer
+                  🗑 Delete
                 </button>
               )}
               <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center"
@@ -323,7 +323,7 @@ function FolderBrowser({ folders, onClose, onFoldersChange }: {
                 onKeyDown={(e) => { if (e.key === 'Enter') handleRenameFolder(openFolderId!); if (e.key === 'Escape') setRenamingId(null); }}
                 className="flex-1 px-3 py-2 rounded-xl text-sm font-semibold bg-transparent outline-none"
                 style={{ background: '#0f0f25', border: '1px solid #7c3aed', color: '#f0f0ff' }}
-                placeholder="Nouveau nom..." />
+                placeholder="New name..." />
               <button onClick={() => handleRenameFolder(openFolderId!)}
                 className="px-4 py-2 rounded-xl text-sm font-bold"
                 style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: 'white' }}>OK</button>
@@ -346,7 +346,7 @@ function FolderBrowser({ folders, onClose, onFoldersChange }: {
                       border: `1px solid ${typeFilter === t ? '#7c3aed' : '#1a1a32'}`,
                       color: typeFilter === t ? '#a78bfa' : '#4b5563',
                     }}>
-                    {t === 'all' ? 'Tous' : t === 'video' ? '🎬 Vidéos' : '🖼️ Photos'}
+                    {t === 'all' ? 'All' : t === 'video' ? '🎬 Videos' : '🖼️ Photos'}
                   </button>
                 ))}
               </div>
@@ -354,8 +354,8 @@ function FolderBrowser({ folders, onClose, onFoldersChange }: {
               {filtered.length === 0 ? (
                 <div className="text-center py-16">
                   <div className="text-5xl mb-3">📁</div>
-                  <p style={{ color: '#374151' }}>Aucun dossier pour le moment</p>
-                  <p className="text-xs mt-1" style={{ color: '#1f2937' }}>Créez un dossier lors du prochain traitement</p>
+                  <p style={{ color: '#374151' }}>No folders yet</p>
+                  <p className="text-xs mt-1" style={{ color: '#1f2937' }}>Create a folder on your next upload</p>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -370,7 +370,7 @@ function FolderBrowser({ folders, onClose, onFoldersChange }: {
                       <div className="flex-1 min-w-0">
                         <p className="font-bold text-sm truncate" style={{ color: '#f0f0ff' }}>{folder.name}</p>
                         <p className="text-xs mt-0.5" style={{ color: '#4b5563' }}>
-                          {variantCounts[folder.id] ?? '…'} variante{(variantCounts[folder.id] ?? 0) !== 1 ? 's' : ''} · {fmtDate(folder.createdAt)}
+                          {variantCounts[folder.id] ?? '…'} variant{(variantCounts[folder.id] ?? 0) !== 1 ? 's' : ''} · {fmtDate(folder.createdAt)}
                         </p>
                       </div>
                       <button onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder.id); }}
@@ -391,7 +391,7 @@ function FolderBrowser({ folders, onClose, onFoldersChange }: {
                   {[1, 2, 3].map((i) => <div key={i} className="h-16 rounded-2xl shimmer" style={{ opacity: 0.15 }} />)}
                 </div>
               ) : folderVariants.length === 0 ? (
-                <div className="text-center py-12" style={{ color: '#374151' }}>Aucune variante dans ce dossier</div>
+                <div className="text-center py-12" style={{ color: '#374151' }}>No variants in this folder</div>
               ) : (
                 <div className="space-y-2">
                   {folderVariants.map((v) => {
@@ -904,8 +904,8 @@ export default function Home() {
             style={{ background: '#09091a', borderColor: '#1a1a32', color: '#6b7280' }}>
             <span className="text-xl">📁</span>
             <div className="text-left">
-              <p className="text-sm font-bold" style={{ color: '#9ca3af' }}>Mes Dossiers</p>
-              <p className="text-[11px]">{folders.length} dossier{folders.length !== 1 ? 's' : ''} · persistants</p>
+              <p className="text-sm font-bold" style={{ color: '#9ca3af' }}>My Folders</p>
+              <p className="text-[11px]">{folders.length} folder{folders.length !== 1 ? 's' : ''} · persistent</p>
             </div>
             {folders.length > 0 && (
               <span className="ml-1 px-2 py-0.5 rounded-full text-xs font-black" style={{ background: 'rgba(124,58,237,0.2)', color: '#a78bfa' }}>
@@ -929,7 +929,7 @@ export default function Home() {
             <div className="px-6 pt-6 pb-5">
               <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4"
                 style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)' }}>💾</div>
-              <p className="text-lg font-black text-center mb-1" style={{ color: '#f0f0ff' }}>Comment sauvegarder ?</p>
+              <p className="text-lg font-black text-center mb-1" style={{ color: '#f0f0ff' }}>How to save?</p>
               <p className="text-xs text-center mb-5" style={{ color: '#4b5563' }}>
                 {pendingFile?.name}
               </p>
@@ -937,7 +937,7 @@ export default function Home() {
               {/* Folder name input */}
               <div className="mb-4">
                 <label className="text-xs font-bold uppercase tracking-widest mb-2 block" style={{ color: '#374151' }}>
-                  Nom du dossier
+                  Folder name
                 </label>
                 <input
                   autoFocus
@@ -958,13 +958,13 @@ export default function Home() {
                   color: folderNameInput.trim() ? 'white' : '#374151',
                   boxShadow: folderNameInput.trim() ? '0 0 20px rgba(124,58,237,0.35)' : 'none',
                 }}>
-                {savingFolder ? '...' : '📁 Créer le dossier et continuer'}
+                {savingFolder ? '...' : '📁 Create folder and continue'}
               </button>
 
               <button onClick={confirmAlone}
                 className="w-full py-2.5 rounded-xl font-semibold text-sm transition-all"
                 style={{ background: '#09091a', border: '1px solid #1a1a32', color: '#6b7280' }}>
-                ⚡ Generate Alone — sans dossier
+                ⚡ Generate Alone — no folder
               </button>
             </div>
           </div>
@@ -980,22 +980,22 @@ export default function Home() {
             <div className="px-6 pt-6 pb-4">
               <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4"
                 style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)' }}>🪞</div>
-              <p className="text-lg font-black text-center" style={{ color: '#f0f0ff' }}>Effet miroir ?</p>
+              <p className="text-lg font-black text-center" style={{ color: '#f0f0ff' }}>Mirror effect?</p>
               <p className="text-sm text-center mt-2" style={{ color: '#6b7280' }}>
-                Appliquer le miroir horizontal sur les variantes ?<br />
-                <span style={{ color: '#4b5563', fontSize: '11px' }}>Désactiver si la vidéo contient du texte visible.</span>
+                Apply horizontal mirror to the variants?<br />
+                <span style={{ color: '#4b5563', fontSize: '11px' }}>Disable if the video contains visible text.</span>
               </p>
             </div>
             <div className="px-6 pb-6 grid grid-cols-2 gap-3">
               <button onClick={() => { setShowMirrorModal(false); handleCreate(false); }}
                 className="py-3 rounded-xl font-bold text-sm"
                 style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#9ca3af' }}>
-                ❌ Non, sans miroir
+                ❌ No, without mirror
               </button>
               <button onClick={() => { setShowMirrorModal(false); handleCreate(true); }}
                 className="py-3 rounded-xl font-bold text-sm"
                 style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: 'white', boxShadow: '0 0 20px rgba(124,58,237,0.35)' }}>
-                🪞 Oui, mirror
+                🪞 Yes, mirror
               </button>
             </div>
           </div>
