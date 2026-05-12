@@ -228,15 +228,16 @@ export function buildFFmpegArgs(
   const args: string[] = ['-i', inputName];
 
   const vf = buildVideoFilters(p);
-  if (vf) args.push('-vf', vf);
-
-  const af = buildAudioFilters(p);
-  if (!isImage && hasAudio && af) args.push('-af', af);
 
   if (isImage) {
-    // Explicit codec + pixel format required for WASM JPEG encoder stability
-    args.push('-vframes', '1', '-c:v', 'mjpeg', '-pix_fmt', 'yuvj420p', '-q:v', '2');
+    // Prepend format=yuv420p to normalise JPEG decoder's full-range yuvj420p output.
+    // Output as PNG (rgb24) — the mjpeg WASM encoder crashes; png encoder is stable.
+    args.push('-vf', vf ? `format=yuv420p,${vf}` : 'format=yuv420p');
+    args.push('-vframes', '1', '-c:v', 'png', '-pix_fmt', 'rgb24');
   } else {
+    if (vf) args.push('-vf', vf);
+    const af = buildAudioFilters(p);
+    if (hasAudio && af) args.push('-af', af);
     args.push(
       '-c:v', 'libx264',
       '-preset', p.preset,
@@ -245,7 +246,6 @@ export function buildFFmpegArgs(
       '-b:v', `${p.bitrate}k`,
       ...(hasAudio ? ['-c:a', 'aac', '-b:a', `${p.audioBitrate}k`] : ['-an']),
     );
-    // Metadata
     for (const [k, v] of Object.entries(p.metadata)) {
       args.push('-metadata', `${k}=${v}`);
     }

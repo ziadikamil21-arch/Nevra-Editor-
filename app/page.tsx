@@ -286,7 +286,7 @@ export default function Home() {
     if (!currentFile || !ff || (isImage ? photoIsProcessing : videoIsProcessing)) return;
 
     const ext = currentFile.name.split('.').pop()?.toLowerCase() ?? (isImage ? 'jpg' : 'mp4');
-    const outExt = isImage ? 'jpg' : 'mp4';
+    const outExt = isImage ? 'png' : 'mp4'; // PNG: stable WASM encoder (mjpeg crashes)
     const setVariants = isImage ? setPhotoVariants : setVideoVariants;
     const setDeletedIdxs = isImage ? setPhotoDeletedIdxs : setVideoDeletedIdxs;
     const setIsProcessing = isImage ? setPhotoIsProcessing : setVideoIsProcessing;
@@ -320,7 +320,7 @@ export default function Home() {
         ff.off('progress', onProgress);
 
         const raw = await ff.readFile(outputName);
-        const blob = new Blob([raw as unknown as BlobPart], { type: isImage ? 'image/jpeg' : 'video/mp4' });
+        const blob = new Blob([raw as unknown as BlobPart], { type: isImage ? 'image/png' : 'video/mp4' });
         try { await ff.deleteFile(outputName); } catch { /* ok */ }
 
         setVariants((prev) => prev.map((v) =>
