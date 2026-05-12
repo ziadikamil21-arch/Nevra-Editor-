@@ -214,9 +214,9 @@ export function buildFFmpegArgs(
       '-c:v', 'libx264',
       '-preset', 'fast',
       '-crf', '20',
+      '-pix_fmt', 'yuv420p',   // Required for QuickTime / Instagram compatibility
       '-b:v', `${p.bitrate}k`,
       ...(hasAudio ? ['-c:a', 'aac', '-b:a', `${p.audioBitrate}k`] : ['-an']),
-      '-movflags', '+faststart',
     );
     // Metadata
     for (const [k, v] of Object.entries(p.metadata)) {
