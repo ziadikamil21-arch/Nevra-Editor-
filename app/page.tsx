@@ -217,6 +217,11 @@ function FolderBrowser({ folders, onClose, onFoldersChange }: {
   const [renameVal, setRenameVal] = useState('');
   const [variantCounts, setVariantCounts] = useState<Record<string, number>>({});
   const blobUrlsRef = useRef<string[]>([]);
+  // Inline create-folder form
+  const [showCreate, setShowCreate] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createType, setCreateType] = useState<'video' | 'photo'>('video');
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     // Load variant counts for all folders
@@ -270,6 +275,19 @@ function FolderBrowser({ folders, onClose, onFoldersChange }: {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   };
 
+  const handleCreateFolder = async () => {
+    if (!createName.trim() || creating) return;
+    setCreating(true);
+    try {
+      const folder = await createFolder(createName.trim(), createType);
+      onFoldersChange([folder, ...folders]);
+      setCreateName('');
+      setShowCreate(false);
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const filtered = folders.filter((f) => typeFilter === 'all' || f.type === typeFilter);
   const openFolder_ = openFolderId ? folders.find((f) => f.id === openFolderId) : null;
 
@@ -311,10 +329,62 @@ function FolderBrowser({ folders, onClose, onFoldersChange }: {
                   🗑 Delete
                 </button>
               )}
+              {!openFolderId && (
+                <button onClick={() => { setShowCreate((v) => !v); setCreateName(''); }}
+                  className="w-8 h-8 rounded-xl flex items-center justify-center font-black text-lg transition-all hover:scale-110"
+                  style={{ background: showCreate ? 'rgba(124,58,237,0.25)' : 'rgba(124,58,237,0.12)', border: `1px solid ${showCreate ? '#7c3aed' : 'rgba(124,58,237,0.3)'}`, color: '#a78bfa' }}
+                  title="New folder">+</button>
+              )}
               <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center"
                 style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#9ca3af' }}>✕</button>
             </div>
           </div>
+
+          {/* Inline create-folder form */}
+          {showCreate && !openFolderId && (
+            <div className="mb-4 rounded-2xl border overflow-hidden"
+              style={{ background: '#0c0c1e', borderColor: '#7c3aed', boxShadow: '0 0 20px rgba(124,58,237,0.15)' }}>
+              <div className="px-4 pt-4 pb-3">
+                <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: '#7c3aed' }}>New Folder</p>
+                {/* Type selector */}
+                <div className="flex gap-2 mb-3">
+                  {(['video', 'photo'] as const).map((t) => (
+                    <button key={t} onClick={() => setCreateType(t)}
+                      className="flex-1 py-1.5 rounded-xl text-xs font-bold transition-all"
+                      style={{
+                        background: createType === t ? 'rgba(124,58,237,0.2)' : '#09091a',
+                        border: `1px solid ${createType === t ? '#7c3aed' : '#1a1a32'}`,
+                        color: createType === t ? '#a78bfa' : '#4b5563',
+                      }}>
+                      {t === 'video' ? '🎬 Video' : '🖼️ Photo'}
+                    </button>
+                  ))}
+                </div>
+                {/* Name input */}
+                <div className="flex gap-2">
+                  <input
+                    autoFocus
+                    value={createName}
+                    onChange={(e) => setCreateName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') setShowCreate(false); }}
+                    className="flex-1 px-3 py-2 rounded-xl text-sm font-semibold bg-transparent outline-none"
+                    style={{ background: '#09091a', border: '1px solid #2d2d5a', color: '#f0f0ff' }}
+                    placeholder="Folder name..." />
+                  <button onClick={handleCreateFolder} disabled={!createName.trim() || creating}
+                    className="px-4 py-2 rounded-xl text-sm font-bold transition-all"
+                    style={{
+                      background: createName.trim() ? 'linear-gradient(135deg,#7c3aed,#4f46e5)' : '#1a1a32',
+                      color: createName.trim() ? 'white' : '#374151',
+                    }}>
+                    {creating ? '…' : 'Create'}
+                  </button>
+                  <button onClick={() => setShowCreate(false)}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-sm"
+                    style={{ background: '#0f0f25', border: '1px solid #1a1a32', color: '#6b7280' }}>✕</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Rename inline input */}
           {renamingId === openFolderId && openFolder_ && (
