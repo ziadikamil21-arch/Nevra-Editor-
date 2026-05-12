@@ -6,6 +6,11 @@ import {
   type Quality, type ClientVariant,
 } from '@/lib/client-processor';
 import { processImageWithCanvas } from '@/lib/canvas-image-processor';
+import {
+  loadFolders, createFolder, renameFolder, deleteFolder,
+  getVariantsByFolder, saveVariant, deleteVariant,
+  type NevraFolder, type NevraVariant,
+} from '@/lib/storage';
 
 type FileMode = 'video' | 'photo';
 
@@ -33,6 +38,9 @@ const QUALITY_CONFIG = {
 function fmtBytes(b: number) {
   return b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
 }
+function fmtDate(ts: number) {
+  return new Date(ts).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
 
 function TransformRow({ icon, label, value, color }: { icon: string; label: string; value: string; color?: string }) {
   return (
@@ -46,12 +54,13 @@ function TransformRow({ icon, label, value, color }: { icon: string; label: stri
   );
 }
 
-function VariantCard({ v, onDelete, onDownload }: { v: ClientVariant; onDelete: () => void; onDownload: () => void }) {
+function VariantCard({ v, onDelete, onDownload, savedToFolder }: {
+  v: ClientVariant; onDelete: () => void; onDownload: () => void; savedToFolder?: boolean;
+}) {
   const s = v.summary;
   const isDone = v.status === 'done';
   const isProcessing = v.status === 'processing';
   const isError = v.status === 'error';
-
   return (
     <div className="rounded-2xl border overflow-hidden transition-all duration-300"
       style={{
@@ -59,19 +68,20 @@ function VariantCard({ v, onDelete, onDownload }: { v: ClientVariant; onDelete: 
         borderColor: isDone ? '#2d2d5a' : isProcessing ? '#7c3aed' : isError ? '#7f1d1d' : '#1a1a32',
         boxShadow: isProcessing ? '0 0 20px rgba(124,58,237,0.15)' : 'none',
       }}>
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: '#1a1a32' }}>
         <div className="flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black"
-            style={{
-              background: isDone ? 'rgba(124,58,237,0.25)' : isProcessing ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.04)',
-              color: isDone ? '#a78bfa' : isProcessing ? '#7c3aed' : '#4b5563',
-            }}>
+            style={{ background: isDone ? 'rgba(124,58,237,0.25)' : isProcessing ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.04)', color: isDone ? '#a78bfa' : isProcessing ? '#7c3aed' : '#4b5563' }}>
             {v.index + 1}
           </div>
           <span className="text-sm font-bold" style={{ color: isDone ? '#f0f0ff' : isProcessing ? '#a78bfa' : '#4b5563' }}>
             Variant {v.index + 1}
           </span>
+          {savedToFolder && isDone && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)' }}>
+              📁 Saved
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {isProcessing && (
@@ -91,8 +101,6 @@ function VariantCard({ v, onDelete, onDownload }: { v: ClientVariant; onDelete: 
             style={{ background: 'rgba(239,68,68,0.2)', color: '#f87171', border: '1px solid rgba(239,68,68,0.35)', flexShrink: 0 }}>✕</button>
         </div>
       </div>
-
-      {/* Transforms */}
       {isDone && s && (
         <div className="px-3 py-3 space-y-1">
           <p className="text-[10px] font-bold uppercase tracking-widest px-1 mb-2" style={{ color: '#374151' }}>Applied Transformations</p>
@@ -108,17 +116,11 @@ function VariantCard({ v, onDelete, onDownload }: { v: ClientVariant; onDelete: 
           {Math.abs(s.rotationDeg) > 0.01 && <TransformRow icon="🔄" label="Rotation" value={`${s.rotationDeg > 0 ? '+' : ''}${s.rotationDeg.toFixed(3)}°`} color="#c084fc" />}
           {s.mirror && <TransformRow icon="🪞" label="Mirror" value="Horizontal flip" color="#67e8f9" />}
           {s.warmth !== 'neutral' && (
-            <TransformRow
-              icon={s.warmth === 'warm' ? '🌅' : '🧊'}
-              label={s.warmth === 'warm' ? 'Warm filter' : 'Cold filter'}
-              value={`${s.warmthStrength.toFixed(1)}% intensity`}
-              color={s.warmth === 'warm' ? '#fb923c' : '#67e8f9'}
-            />
+            <TransformRow icon={s.warmth === 'warm' ? '🌅' : '🧊'} label={s.warmth === 'warm' ? 'Warm filter' : 'Cold filter'} value={`${s.warmthStrength.toFixed(1)}% intensity`} color={s.warmth === 'warm' ? '#fb923c' : '#67e8f9'} />
           )}
           {s.invisibleText && <TransformRow icon="👻" label="Ghost text" value="invisible micro-shift" color="#818cf8" />}
         </div>
       )}
-
       {isProcessing && (
         <div className="px-3 py-3 space-y-1.5">
           {[75, 55, 65, 50, 70].map((w, i) => (
@@ -131,13 +133,10 @@ function VariantCard({ v, onDelete, onDownload }: { v: ClientVariant; onDelete: 
           )}
         </div>
       )}
-
       {isError && <div className="px-4 py-3 text-xs" style={{ color: '#f87171' }}>{v.error ?? 'Processing failed'}</div>}
-
       {isDone && v.blobUrl && (
         <div className="px-3 pb-3 mt-1">
-          <button onClick={onDownload}
-            className="w-full flex items-center justify-center gap-2 text-sm font-bold py-2.5 rounded-xl"
+          <button onClick={onDownload} className="w-full flex items-center justify-center gap-2 text-sm font-bold py-2.5 rounded-xl"
             style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: 'white' }}>
             ⬇ Download Variant {v.index + 1}
           </button>
@@ -147,12 +146,9 @@ function VariantCard({ v, onDelete, onDownload }: { v: ClientVariant; onDelete: 
   );
 }
 
-function ResultsSection({
-  label, icon, variants, deletedIdxs, isProcessing,
-  onDelete, onDownload, onDownloadAll, resultsRef,
-}: {
-  label: string; icon: string;
-  variants: ClientVariant[]; deletedIdxs: Set<number>; isProcessing: boolean;
+function ResultsSection({ label, icon, variants, deletedIdxs, isProcessing, currentFolder, onDelete, onDownload, onDownloadAll, resultsRef }: {
+  label: string; icon: string; variants: ClientVariant[]; deletedIdxs: Set<number>;
+  isProcessing: boolean; currentFolder: NevraFolder | null;
   onDelete: (idx: number) => void; onDownload: (v: ClientVariant) => void;
   onDownloadAll: () => void; resultsRef: React.RefObject<HTMLDivElement>;
 }) {
@@ -162,20 +158,22 @@ function ResultsSection({
   const allDone = total > 0 && variants.every((v) => v.status === 'done' || v.status === 'error');
   const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
   if (visible.length === 0) return null;
-
   return (
     <div ref={resultsRef} className="mt-8">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-base">{icon}</span>
           <p className="text-xs font-bold uppercase tracking-widest" style={{ color: '#374151' }}>
-            {label}
-            {doneCount > 0 && <span className="ml-2 font-black" style={{ color: '#7c3aed' }}>{doneCount}/{total}</span>}
+            {label}{doneCount > 0 && <span className="ml-2 font-black" style={{ color: '#7c3aed' }}>{doneCount}/{total}</span>}
           </p>
+          {currentFolder && (
+            <span className="text-[10px] px-2 py-0.5 rounded-md font-semibold" style={{ background: 'rgba(124,58,237,0.1)', color: '#a78bfa', border: '1px solid rgba(124,58,237,0.25)' }}>
+              📁 {currentFolder.name}
+            </span>
+          )}
         </div>
         {doneCount > 1 && (
-          <button onClick={onDownloadAll}
-            className="text-xs px-3 py-1.5 rounded-xl font-semibold"
+          <button onClick={onDownloadAll} className="text-xs px-3 py-1.5 rounded-xl font-semibold"
             style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.3)', color: '#a78bfa' }}>
             ⬇ Download All
           </button>
@@ -184,7 +182,7 @@ function ResultsSection({
       <div className="mb-4">
         <div className="flex justify-between items-center mb-1.5">
           <span className="text-xs font-medium" style={{ color: allDone ? '#10b981' : '#7c3aed' }}>
-            {allDone ? `✅ ${doneCount} variant${doneCount !== 1 ? 's' : ''} ready`
+            {allDone ? `✅ ${doneCount} variant${doneCount !== 1 ? 's' : ''} ready${currentFolder ? ` · saved to 📁 ${currentFolder.name}` : ''}`
               : isProcessing ? `Editing variant ${doneCount + 1} of ${total}...`
               : `${doneCount}/${total} done`}
           </span>
@@ -197,17 +195,250 @@ function ResultsSection({
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {visible.map((v) => (
-          <VariantCard key={v.index} v={v} onDelete={() => onDelete(v.index)} onDownload={() => onDownload(v)} />
+          <VariantCard key={v.index} v={v} savedToFolder={!!currentFolder && v.status === 'done'}
+            onDelete={() => onDelete(v.index)} onDownload={() => onDownload(v)} />
         ))}
       </div>
     </div>
   );
 }
 
+// ── Folder Browser ─────────────────────────────────────────────────────────────
+function FolderBrowser({ folders, onClose, onFoldersChange }: {
+  folders: NevraFolder[];
+  onClose: () => void;
+  onFoldersChange: (folders: NevraFolder[]) => void;
+}) {
+  const [typeFilter, setTypeFilter] = useState<'all' | 'video' | 'photo'>('all');
+  const [openFolderId, setOpenFolderId] = useState<string | null>(null);
+  const [folderVariants, setFolderVariants] = useState<NevraVariant[]>([]);
+  const [loadingVariants, setLoadingVariants] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameVal, setRenameVal] = useState('');
+  const [variantCounts, setVariantCounts] = useState<Record<string, number>>({});
+  const blobUrlsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    // Load variant counts for all folders
+    Promise.all(
+      folders.map(async (f) => {
+        const vs = await getVariantsByFolder(f.id);
+        return [f.id, vs.length] as [string, number];
+      })
+    ).then((pairs) => setVariantCounts(Object.fromEntries(pairs)));
+  }, [folders]);
+
+  // Cleanup blob URLs on unmount
+  useEffect(() => {
+    return () => { blobUrlsRef.current.forEach((u) => URL.revokeObjectURL(u)); };
+  }, []);
+
+  const openFolder = async (folderId: string) => {
+    setLoadingVariants(true);
+    setOpenFolderId(folderId);
+    const vs = await getVariantsByFolder(folderId);
+    setFolderVariants(vs);
+    setLoadingVariants(false);
+  };
+
+  const handleDeleteFolder = async (folderId: string) => {
+    if (!confirm('Supprimer ce dossier et toutes ses variantes ?')) return;
+    await deleteFolder(folderId);
+    const updated = folders.filter((f) => f.id !== folderId);
+    onFoldersChange(updated);
+    if (openFolderId === folderId) setOpenFolderId(null);
+  };
+
+  const handleRenameFolder = async (folderId: string) => {
+    if (!renameVal.trim()) return;
+    await renameFolder(folderId, renameVal.trim());
+    onFoldersChange(folders.map((f) => f.id === folderId ? { ...f, name: renameVal.trim() } : f));
+    setRenamingId(null);
+  };
+
+  const handleDeleteVariant = async (variantId: string) => {
+    await deleteVariant(variantId);
+    const updated = folderVariants.filter((v) => v.id !== variantId);
+    setFolderVariants(updated);
+    if (openFolderId) setVariantCounts((p) => ({ ...p, [openFolderId]: updated.length }));
+  };
+
+  const handleDownloadVariant = (v: NevraVariant) => {
+    const url = URL.createObjectURL(v.blob);
+    blobUrlsRef.current.push(url);
+    const a = document.createElement('a'); a.href = url; a.download = v.filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
+  const filtered = folders.filter((f) => typeFilter === 'all' || f.type === typeFilter);
+  const openFolder_ = openFolderId ? folders.find((f) => f.id === openFolderId) : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}>
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-2xl mx-auto px-4 py-6">
+
+          {/* Header */}
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              {openFolderId && (
+                <button onClick={() => setOpenFolderId(null)} className="w-8 h-8 rounded-xl flex items-center justify-center"
+                  style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#9ca3af' }}>←</button>
+              )}
+              <div>
+                <h2 className="text-lg font-black" style={{ color: '#f0f0ff' }}>
+                  {openFolder_ ? openFolder_.name : '📁 Mes Dossiers'}
+                </h2>
+                <p className="text-xs" style={{ color: '#4b5563' }}>
+                  {openFolder_
+                    ? `${folderVariants.length} variante${folderVariants.length !== 1 ? 's' : ''} · ${openFolder_.type === 'video' ? '🎬 Vidéo' : '🖼️ Photo'}`
+                    : `${folders.length} dossier${folders.length !== 1 ? 's' : ''}`}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {openFolder_ && renamingId !== openFolderId && (
+                <button onClick={() => { setRenamingId(openFolderId!); setRenameVal(openFolder_.name); }}
+                  className="text-xs px-3 py-1.5 rounded-xl font-semibold"
+                  style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#9ca3af' }}>
+                  ✏️ Renommer
+                </button>
+              )}
+              {openFolder_ && (
+                <button onClick={() => handleDeleteFolder(openFolderId!)}
+                  className="text-xs px-3 py-1.5 rounded-xl font-semibold"
+                  style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171' }}>
+                  🗑 Supprimer
+                </button>
+              )}
+              <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center"
+                style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#9ca3af' }}>✕</button>
+            </div>
+          </div>
+
+          {/* Rename inline input */}
+          {renamingId === openFolderId && openFolder_ && (
+            <div className="flex gap-2 mb-4">
+              <input autoFocus value={renameVal} onChange={(e) => setRenameVal(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleRenameFolder(openFolderId!); if (e.key === 'Escape') setRenamingId(null); }}
+                className="flex-1 px-3 py-2 rounded-xl text-sm font-semibold bg-transparent outline-none"
+                style={{ background: '#0f0f25', border: '1px solid #7c3aed', color: '#f0f0ff' }}
+                placeholder="Nouveau nom..." />
+              <button onClick={() => handleRenameFolder(openFolderId!)}
+                className="px-4 py-2 rounded-xl text-sm font-bold"
+                style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: 'white' }}>OK</button>
+              <button onClick={() => setRenamingId(null)}
+                className="px-3 py-2 rounded-xl text-sm"
+                style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#6b7280' }}>✕</button>
+            </div>
+          )}
+
+          {/* Folder view */}
+          {!openFolderId ? (
+            <>
+              {/* Type filter tabs */}
+              <div className="flex gap-2 mb-4">
+                {(['all', 'video', 'photo'] as const).map((t) => (
+                  <button key={t} onClick={() => setTypeFilter(t)}
+                    className="px-4 py-1.5 rounded-xl text-xs font-bold transition-all"
+                    style={{
+                      background: typeFilter === t ? 'rgba(124,58,237,0.2)' : '#09091a',
+                      border: `1px solid ${typeFilter === t ? '#7c3aed' : '#1a1a32'}`,
+                      color: typeFilter === t ? '#a78bfa' : '#4b5563',
+                    }}>
+                    {t === 'all' ? 'Tous' : t === 'video' ? '🎬 Vidéos' : '🖼️ Photos'}
+                  </button>
+                ))}
+              </div>
+
+              {filtered.length === 0 ? (
+                <div className="text-center py-16">
+                  <div className="text-5xl mb-3">📁</div>
+                  <p style={{ color: '#374151' }}>Aucun dossier pour le moment</p>
+                  <p className="text-xs mt-1" style={{ color: '#1f2937' }}>Créez un dossier lors du prochain traitement</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {filtered.map((folder) => (
+                    <div key={folder.id} className="rounded-2xl border p-4 flex items-center gap-4 cursor-pointer transition-all hover:border-purple-700"
+                      style={{ background: '#0c0c1e', borderColor: '#1a1a32' }}
+                      onClick={() => openFolder(folder.id)}>
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
+                        style={{ background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.2)' }}>
+                        {folder.type === 'video' ? '🎬' : '🖼️'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-sm truncate" style={{ color: '#f0f0ff' }}>{folder.name}</p>
+                        <p className="text-xs mt-0.5" style={{ color: '#4b5563' }}>
+                          {variantCounts[folder.id] ?? '…'} variante{(variantCounts[folder.id] ?? 0) !== 1 ? 's' : ''} · {fmtDate(folder.createdAt)}
+                        </p>
+                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder.id); }}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center text-xs flex-shrink-0 transition-all hover:scale-110"
+                        style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
+                        🗑
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            /* Variant list inside folder */
+            <div>
+              {loadingVariants ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => <div key={i} className="h-16 rounded-2xl shimmer" style={{ opacity: 0.15 }} />)}
+                </div>
+              ) : folderVariants.length === 0 ? (
+                <div className="text-center py-12" style={{ color: '#374151' }}>Aucune variante dans ce dossier</div>
+              ) : (
+                <div className="space-y-2">
+                  {folderVariants.map((v) => {
+                    const previewUrl = v.type === 'photo' ? URL.createObjectURL(v.blob) : null;
+                    if (previewUrl) blobUrlsRef.current.push(previewUrl);
+                    return (
+                      <div key={v.id} className="rounded-2xl border p-3 flex items-center gap-3"
+                        style={{ background: '#0c0c1e', borderColor: '#1a1a32' }}>
+                        {previewUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={previewUrl} alt="" className="w-14 h-10 rounded-lg object-cover flex-shrink-0" />
+                        ) : (
+                          <div className="w-14 h-10 rounded-lg flex items-center justify-center text-xl flex-shrink-0"
+                            style={{ background: '#0f0f25', border: '1px solid #1a1a32' }}>🎬</div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate" style={{ color: '#e2e8f0' }}>{v.filename}</p>
+                          <p className="text-xs" style={{ color: '#4b5563' }}>{fmtBytes(v.size)} · {fmtDate(v.createdAt)}</p>
+                        </div>
+                        <button onClick={() => handleDownloadVariant(v)}
+                          className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                          style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)', color: '#a78bfa' }}>
+                          ⬇
+                        </button>
+                        <button onClick={() => handleDeleteVariant(v.id)}
+                          className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                          style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171' }}>
+                          🗑
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 export default function Home() {
   const [activeMode, setActiveMode] = useState<FileMode>('video');
 
-  // ── Video state ──────────────────────────────────────────────────────────
+  // Video state
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [videoVariants, setVideoVariants] = useState<ClientVariant[]>([]);
@@ -215,7 +446,7 @@ export default function Home() {
   const [videoIsProcessing, setVideoIsProcessing] = useState(false);
   const [vowbMode, setVowbMode] = useState(false);
 
-  // ── Photo state ──────────────────────────────────────────────────────────
+  // Photo state
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [photoVariants, setPhotoVariants] = useState<ClientVariant[]>([]);
@@ -223,7 +454,7 @@ export default function Home() {
   const [photoIsProcessing, setPhotoIsProcessing] = useState(false);
   const [powbMode, setPowbMode] = useState(false);
 
-  // ── Shared ───────────────────────────────────────────────────────────────
+  // Shared
   const [quality, setQuality] = useState<Quality>('max');
   const [variantCount, setVariantCount] = useState(3);
   const [isDragging, setIsDragging] = useState(false);
@@ -232,21 +463,30 @@ export default function Home() {
   const [ffmpegLoading, setFfmpegLoading] = useState(false);
   const [showMirrorModal, setShowMirrorModal] = useState(false);
 
-  // One FFmpeg instance for videos — photos use Canvas API (no WASM needed)
+  // Folder system
+  const [folders, setFolders] = useState<NevraFolder[]>([]);
+  const [videoFolder, setVideoFolder] = useState<NevraFolder | null>(null); // folder for current video session
+  const [photoFolder, setPhotoFolder] = useState<NevraFolder | null>(null); // folder for current photo session
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [showSaveModeModal, setShowSaveModeModal] = useState(false);
+  const [folderNameInput, setFolderNameInput] = useState('');
+  const [savingFolder, setSavingFolder] = useState(false);
+  const [showFolderBrowser, setShowFolderBrowser] = useState(false);
+
   const ffVideoRef = useRef<import('@ffmpeg/ffmpeg').FFmpeg | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoResultsRef = useRef<HTMLDivElement>(null);
   const photoResultsRef = useRef<HTMLDivElement>(null);
 
-  // Active-mode shortcuts
   const file = activeMode === 'video' ? videoFile : photoFile;
   const previewUrl = activeMode === 'video' ? videoPreviewUrl : photoPreviewUrl;
   const isProcessing = activeMode === 'video' ? videoIsProcessing : photoIsProcessing;
+  const currentFolder = activeMode === 'video' ? videoFolder : photoFolder;
   const acceptAttr = activeMode === 'video'
     ? 'video/mp4,video/quicktime,video/x-msvideo,video/webm'
     : 'image/jpeg,image/png,image/webp';
 
-  // Load both FFmpeg instances in parallel on mount
+  // Load FFmpeg (video only)
   useEffect(() => {
     async function init() {
       setFfmpegLoading(true);
@@ -254,7 +494,6 @@ export default function Home() {
         const { FFmpeg } = await import('@ffmpeg/ffmpeg');
         const { toBlobURL } = await import('@ffmpeg/util');
         const base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-        // Fetch WASM files once, reuse for both instances
         const [coreURL, wasmURL] = await Promise.all([
           toBlobURL(`${base}/ffmpeg-core.js`, 'text/javascript'),
           toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
@@ -273,36 +512,77 @@ export default function Home() {
     init();
   }, []);
 
-  const handleFile = useCallback((f: File) => {
+  // Load persisted folders on mount
+  useEffect(() => {
+    loadFolders().then(setFolders).catch(console.error);
+  }, []);
+
+  // ── File handling: show save-mode modal on drop ────────────────────────────
+  const validateFile = useCallback((f: File): boolean => {
     const isVid = f.type.startsWith('video/');
     const isImg = f.type.startsWith('image/');
-    if (!isVid && !isImg) { setError('Unsupported format.'); return; }
-    if (activeMode === 'video' && !isVid) { setError('Please drop a video, or switch to Photo mode.'); return; }
-    if (activeMode === 'photo' && !isImg) { setError('Please drop an image, or switch to Video mode.'); return; }
+    if (!isVid && !isImg) { setError('Unsupported format.'); return false; }
+    if (activeMode === 'video' && !isVid) { setError('Please drop a video, or switch to Photo mode.'); return false; }
+    if (activeMode === 'photo' && !isImg) { setError('Please drop an image, or switch to Video mode.'); return false; }
+    return true;
+  }, [activeMode]);
+
+  const applyFile = useCallback((f: File) => {
     setError(null);
     if (activeMode === 'video') {
-      setVideoFile(f); setVideoVariants([]); setVideoDeletedIdxs(new Set());
+      setVideoFile(f); setVideoVariants([]); setVideoDeletedIdxs(new Set()); setVideoFolder(null);
       setVideoPreviewUrl(URL.createObjectURL(f));
     } else {
-      setPhotoFile(f); setPhotoVariants([]); setPhotoDeletedIdxs(new Set());
+      setPhotoFile(f); setPhotoVariants([]); setPhotoDeletedIdxs(new Set()); setPhotoFolder(null);
       setPhotoPreviewUrl(URL.createObjectURL(f));
     }
   }, [activeMode]);
 
-  // Switching mode never clears the other mode's state
+  const handleFile = useCallback((f: File) => {
+    if (!validateFile(f)) return;
+    setPendingFile(f);
+    setFolderNameInput('');
+    setShowSaveModeModal(true);
+  }, [validateFile]);
+
+  const confirmAlone = () => {
+    setShowSaveModeModal(false);
+    if (pendingFile) { applyFile(pendingFile); setPendingFile(null); }
+  };
+
+  const confirmFolder = async () => {
+    if (!folderNameInput.trim() || !pendingFile) return;
+    setSavingFolder(true);
+    try {
+      const type = pendingFile.type.startsWith('video/') ? 'video' : 'photo';
+      const folder = await createFolder(folderNameInput.trim(), type);
+      setFolders((prev) => [folder, ...prev]);
+      if (activeMode === 'video') setVideoFolder(folder);
+      else setPhotoFolder(folder);
+      setShowSaveModeModal(false);
+      applyFile(pendingFile);
+      setPendingFile(null);
+      setFolderNameInput('');
+    } finally {
+      setSavingFolder(false);
+    }
+  };
+
   const switchMode = (mode: FileMode) => { setActiveMode(mode); setError(null); };
 
+  // ── Create variants ────────────────────────────────────────────────────────
   const handleCreate = async (mirrorChoice?: boolean) => {
     const isImage = activeMode === 'photo';
     const currentFile = isImage ? photoFile : videoFile;
     const currentIsProcessing = isImage ? photoIsProcessing : videoIsProcessing;
     if (!currentFile || currentIsProcessing) return;
-    if (!isImage && !ffmpegReady) return; // video needs FFmpeg
+    if (!isImage && !ffmpegReady) return;
 
     const setVariants = isImage ? setPhotoVariants : setVideoVariants;
     const setDeletedIdxs = isImage ? setPhotoDeletedIdxs : setVideoDeletedIdxs;
     const setIsProcessing = isImage ? setPhotoIsProcessing : setVideoIsProcessing;
     const resultsRef = isImage ? photoResultsRef : videoResultsRef;
+    const activeFolder = isImage ? photoFolder : videoFolder;
 
     setIsProcessing(true);
     setError(null);
@@ -311,7 +591,7 @@ export default function Home() {
       index: i, status: 'pending', ffmpegProgress: 0, blobUrl: null, filename: null, summary: null,
     })));
 
-    // ── PHOTO: Canvas API — no FFmpeg, no WASM, no crashes ──────────────────
+    // ── PHOTO: Canvas API ─────────────────────────────────────────────────
     if (isImage) {
       for (let i = 0; i < variantCount; i++) {
         setVariants((prev) => prev.map((v) => v.index === i ? { ...v, status: 'processing' } : v));
@@ -320,25 +600,26 @@ export default function Home() {
           const params = generateParams(quality, false, powbMode, true);
           const outputName = `photo_v${i + 1}_${Math.random().toString(36).slice(2, 8)}.png`;
           const blob = await processImageWithCanvas(currentFile, params);
+          const summary = paramsToSummary(params);
+          // Auto-save to folder
+          if (activeFolder) {
+            saveVariant({ folderId: activeFolder.id, filename: outputName, blob, size: blob.size, summary, type: 'photo' }).catch(console.error);
+          }
           setVariants((prev) => prev.map((v) =>
-            v.index === i ? { ...v, status: 'done', blobUrl: URL.createObjectURL(blob), filename: outputName, summary: paramsToSummary(params), ffmpegProgress: 1 } : v
+            v.index === i ? { ...v, status: 'done', blobUrl: URL.createObjectURL(blob), filename: outputName, summary, ffmpegProgress: 1 } : v
           ));
         } catch (err) {
-          console.error(`Photo variant ${i} failed:`, err);
-          setVariants((prev) => prev.map((v) =>
-            v.index === i ? { ...v, status: 'error', error: String(err) } : v
-          ));
+          setVariants((prev) => prev.map((v) => v.index === i ? { ...v, status: 'error', error: String(err) } : v));
         }
       }
       setIsProcessing(false);
       return;
     }
 
-    // ── VIDEO: FFmpeg WASM ───────────────────────────────────────────────────
+    // ── VIDEO: FFmpeg WASM ─────────────────────────────────────────────────
     const ff = ffVideoRef.current!;
     const ext = currentFile.name.split('.').pop()?.toLowerCase() ?? 'mp4';
     const inputName = `input_v.${ext}`;
-
     const { fetchFile } = await import('@ffmpeg/util');
     await ff.writeFile(inputName, await fetchFile(currentFile));
 
@@ -347,7 +628,6 @@ export default function Home() {
       if (i === 0) setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
       try {
         const params = generateParams(quality, vowbMode, false, false);
-        // Apply user's mirror choice (confirmed via modal before processing)
         if (mirrorChoice !== undefined) params.mirror = mirrorChoice;
         const outputName = `video_v${i + 1}_${Math.random().toString(36).slice(2, 8)}.mp4`;
         const onProgress = ({ progress }: { progress: number }) => {
@@ -358,15 +638,17 @@ export default function Home() {
         ff.off('progress', onProgress);
         const raw = await ff.readFile(outputName);
         const blob = new Blob([raw as unknown as BlobPart], { type: 'video/mp4' });
+        const summary = paramsToSummary(params);
         try { await ff.deleteFile(outputName); } catch { /* ok */ }
+        // Auto-save to folder
+        if (activeFolder) {
+          saveVariant({ folderId: activeFolder.id, filename: outputName, blob, size: blob.size, summary, type: 'video' }).catch(console.error);
+        }
         setVariants((prev) => prev.map((v) =>
-          v.index === i ? { ...v, status: 'done', blobUrl: URL.createObjectURL(blob), filename: outputName, summary: paramsToSummary(params), ffmpegProgress: 1 } : v
+          v.index === i ? { ...v, status: 'done', blobUrl: URL.createObjectURL(blob), filename: outputName, summary, ffmpegProgress: 1 } : v
         ));
       } catch (err) {
-        console.error(`Video variant ${i} failed:`, err);
-        setVariants((prev) => prev.map((v) =>
-          v.index === i ? { ...v, status: 'error', error: String(err) } : v
-        ));
+        setVariants((prev) => prev.map((v) => v.index === i ? { ...v, status: 'error', error: String(err) } : v));
       }
     }
     try { await ff.deleteFile(inputName); } catch { /* ok */ }
@@ -413,7 +695,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Mode toggle — dots show activity on inactive tab */}
+        {/* Mode toggle */}
         <div className="flex justify-center mb-5">
           <div className="flex rounded-2xl p-1 gap-1" style={{ background: '#0d0d1e', border: '1px solid #1c1c3a' }}>
             {(['video', 'photo'] as FileMode[]).map((m) => {
@@ -450,7 +732,6 @@ export default function Home() {
         >
           <input ref={fileInputRef} type="file" accept={acceptAttr} className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }} />
-
           {file ? (
             <div className="p-4 flex items-center gap-4">
               {previewUrl && activeMode === 'video' && (
@@ -462,14 +743,21 @@ export default function Home() {
               )}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold truncate" style={{ color: '#e2e8f0' }}>{file.name}</p>
-                <p className="text-xs mt-0.5" style={{ color: '#4b5563' }}>
-                  {activeMode === 'video' ? '🎬 Video' : '🖼️ Photo'} · {fmtBytes(file.size)}
-                </p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <p className="text-xs" style={{ color: '#4b5563' }}>
+                    {activeMode === 'video' ? '🎬 Video' : '🖼️ Photo'} · {fmtBytes(file.size)}
+                  </p>
+                  {currentFolder && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold" style={{ background: 'rgba(124,58,237,0.1)', color: '#a78bfa', border: '1px solid rgba(124,58,237,0.25)' }}>
+                      📁 {currentFolder.name}
+                    </span>
+                  )}
+                </div>
               </div>
               <button onClick={(e) => {
                 e.stopPropagation();
-                if (activeMode === 'video') { setVideoFile(null); setVideoPreviewUrl(null); setVideoVariants([]); }
-                else { setPhotoFile(null); setPhotoPreviewUrl(null); setPhotoVariants([]); }
+                if (activeMode === 'video') { setVideoFile(null); setVideoPreviewUrl(null); setVideoVariants([]); setVideoFolder(null); }
+                else { setPhotoFile(null); setPhotoPreviewUrl(null); setPhotoVariants([]); setPhotoFolder(null); }
               }} className="text-xs px-3 py-1.5 rounded-lg border shrink-0"
                 style={{ borderColor: '#2d2d5a', color: '#6b7280' }}>Change</button>
             </div>
@@ -489,16 +777,12 @@ export default function Home() {
           )}
         </div>
 
-        {/* VOWB toggle — video mode only */}
+        {/* VOWB toggle */}
         {activeMode === 'video' && (
           <div className="mb-5">
             <button onClick={() => setVowbMode((v) => !v)}
               className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all duration-200"
-              style={{
-                background: vowbMode ? 'rgba(255,255,255,0.05)' : '#09091a',
-                borderColor: vowbMode ? 'rgba(255,255,255,0.3)' : '#1a1a32',
-                boxShadow: vowbMode ? '0 0 20px rgba(255,255,255,0.08)' : 'none',
-              }}>
+              style={{ background: vowbMode ? 'rgba(255,255,255,0.05)' : '#09091a', borderColor: vowbMode ? 'rgba(255,255,255,0.3)' : '#1a1a32', boxShadow: vowbMode ? '0 0 20px rgba(255,255,255,0.08)' : 'none' }}>
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
                   style={{ background: vowbMode ? 'white' : '#0f0f25', border: `1px solid ${vowbMode ? 'white' : '#2d2d5a'}` }}>🤍</div>
@@ -508,23 +792,18 @@ export default function Home() {
                 </div>
               </div>
               <div className="relative w-11 h-6 rounded-full flex-shrink-0 transition-all duration-200" style={{ background: vowbMode ? 'white' : '#1a1a32' }}>
-                <div className="absolute top-0.5 w-5 h-5 rounded-full shadow transition-all duration-200"
-                  style={{ background: vowbMode ? '#7c3aed' : '#4b5563', left: vowbMode ? '22px' : '2px' }} />
+                <div className="absolute top-0.5 w-5 h-5 rounded-full shadow transition-all duration-200" style={{ background: vowbMode ? '#7c3aed' : '#4b5563', left: vowbMode ? '22px' : '2px' }} />
               </div>
             </button>
           </div>
         )}
 
-        {/* POWB toggle — photo mode only */}
+        {/* POWB toggle */}
         {activeMode === 'photo' && (
           <div className="mb-5">
             <button onClick={() => setPowbMode((v) => !v)}
               className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all duration-200"
-              style={{
-                background: powbMode ? 'rgba(255,255,255,0.05)' : '#09091a',
-                borderColor: powbMode ? 'rgba(255,255,255,0.3)' : '#1a1a32',
-                boxShadow: powbMode ? '0 0 20px rgba(255,255,255,0.08)' : 'none',
-              }}>
+              style={{ background: powbMode ? 'rgba(255,255,255,0.05)' : '#09091a', borderColor: powbMode ? 'rgba(255,255,255,0.3)' : '#1a1a32', boxShadow: powbMode ? '0 0 20px rgba(255,255,255,0.08)' : 'none' }}>
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
                   style={{ background: powbMode ? 'white' : '#0f0f25', border: `1px solid ${powbMode ? 'white' : '#2d2d5a'}` }}>🤍</div>
@@ -534,8 +813,7 @@ export default function Home() {
                 </div>
               </div>
               <div className="relative w-11 h-6 rounded-full flex-shrink-0 transition-all duration-200" style={{ background: powbMode ? 'white' : '#1a1a32' }}>
-                <div className="absolute top-0.5 w-5 h-5 rounded-full shadow transition-all duration-200"
-                  style={{ background: powbMode ? '#7c3aed' : '#4b5563', left: powbMode ? '22px' : '2px' }} />
+                <div className="absolute top-0.5 w-5 h-5 rounded-full shadow transition-all duration-200" style={{ background: powbMode ? '#7c3aed' : '#4b5563', left: powbMode ? '22px' : '2px' }} />
               </div>
             </button>
           </div>
@@ -557,11 +835,7 @@ export default function Home() {
               return (
                 <button key={q} onClick={() => setQuality(q)}
                   className="relative rounded-xl border p-4 text-left transition-all duration-200"
-                  style={{
-                    borderColor: sel ? cfg.color : '#1a1a32',
-                    background: sel ? `rgba(${cfg.rgb},0.07)` : '#09091a',
-                    boxShadow: sel ? `0 0 18px ${cfg.glow}` : 'none',
-                  }}>
+                  style={{ borderColor: sel ? cfg.color : '#1a1a32', background: sel ? `rgba(${cfg.rgb},0.07)` : '#09091a', boxShadow: sel ? `0 0 18px ${cfg.glow}` : 'none' }}>
                   {sel && <div className="absolute top-2.5 right-2.5 w-1.5 h-1.5 rounded-full" style={{ background: cfg.color }} />}
                   <p className="font-black text-sm mb-0.5" style={{ color: sel ? cfg.color : '#9ca3af' }}>{cfg.label}</p>
                   <p className="text-[10px] font-medium mb-1.5" style={{ color: sel ? cfg.color : '#374151', opacity: 0.85 }}>{cfg.speed}</p>
@@ -598,8 +872,7 @@ export default function Home() {
         <button
           className="btn-gradient w-full py-4 rounded-2xl font-bold text-base text-white tracking-widest uppercase"
           disabled={!file || (activeMode === 'video' && !ffmpegReady) || isProcessing}
-          onClick={() => activeMode === 'video' ? setShowMirrorModal(true) : handleCreate()}
-        >
+          onClick={() => activeMode === 'video' ? setShowMirrorModal(true) : handleCreate()}>
           {isProcessing ? (
             <span className="flex items-center justify-center gap-2">
               <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
@@ -612,64 +885,130 @@ export default function Home() {
             : `⚡  Create ${variantCount} Variant${variantCount !== 1 ? 's' : ''}`}
         </button>
 
-        {/* Results — both modes shown independently, always visible */}
-        <ResultsSection
-          label="Video Results" icon="🎬"
-          variants={videoVariants} deletedIdxs={videoDeletedIdxs} isProcessing={videoIsProcessing}
+        {/* Results */}
+        <ResultsSection label="Video Results" icon="🎬"
+          variants={videoVariants} deletedIdxs={videoDeletedIdxs} isProcessing={videoIsProcessing} currentFolder={videoFolder}
           onDelete={(idx) => setVideoDeletedIdxs((p) => new Set([...p, idx]))}
-          onDownload={downloadVariant}
-          onDownloadAll={() => downloadAll(videoVariants, videoDeletedIdxs)}
-          resultsRef={videoResultsRef}
-        />
-        <ResultsSection
-          label="Photo Results" icon="🖼️"
-          variants={photoVariants} deletedIdxs={photoDeletedIdxs} isProcessing={photoIsProcessing}
+          onDownload={downloadVariant} onDownloadAll={() => downloadAll(videoVariants, videoDeletedIdxs)}
+          resultsRef={videoResultsRef} />
+        <ResultsSection label="Photo Results" icon="🖼️"
+          variants={photoVariants} deletedIdxs={photoDeletedIdxs} isProcessing={photoIsProcessing} currentFolder={photoFolder}
           onDelete={(idx) => setPhotoDeletedIdxs((p) => new Set([...p, idx]))}
-          onDownload={downloadVariant}
-          onDownloadAll={() => downloadAll(photoVariants, photoDeletedIdxs)}
-          resultsRef={photoResultsRef}
-        />
+          onDownload={downloadVariant} onDownloadAll={() => downloadAll(photoVariants, photoDeletedIdxs)}
+          resultsRef={photoResultsRef} />
 
-        <p className="text-center mt-10 text-xs" style={{ color: '#1f2937' }}>
+        {/* Folder browser button */}
+        <div className="mt-10 flex justify-center">
+          <button onClick={() => setShowFolderBrowser(true)}
+            className="flex items-center gap-3 px-5 py-3 rounded-2xl border transition-all hover:border-purple-700"
+            style={{ background: '#09091a', borderColor: '#1a1a32', color: '#6b7280' }}>
+            <span className="text-xl">📁</span>
+            <div className="text-left">
+              <p className="text-sm font-bold" style={{ color: '#9ca3af' }}>Mes Dossiers</p>
+              <p className="text-[11px]">{folders.length} dossier{folders.length !== 1 ? 's' : ''} · persistants</p>
+            </div>
+            {folders.length > 0 && (
+              <span className="ml-1 px-2 py-0.5 rounded-full text-xs font-black" style={{ background: 'rgba(124,58,237,0.2)', color: '#a78bfa' }}>
+                {folders.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        <p className="text-center mt-6 text-xs" style={{ color: '#1f2937' }}>
           Nevra Editor · Processing runs entirely in your browser
         </p>
       </div>
 
-      {/* Mirror modal — video only, shown before processing starts */}
+      {/* ── Save Mode Modal ─────────────────────────────────────────────────── */}
+      {showSaveModeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4"
+          style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}>
+          <div className="w-full max-w-sm rounded-2xl border overflow-hidden"
+            style={{ background: '#0c0c1e', borderColor: '#2d2d5a', boxShadow: '0 0 60px rgba(124,58,237,0.3)' }}>
+            <div className="px-6 pt-6 pb-5">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4"
+                style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)' }}>💾</div>
+              <p className="text-lg font-black text-center mb-1" style={{ color: '#f0f0ff' }}>Comment sauvegarder ?</p>
+              <p className="text-xs text-center mb-5" style={{ color: '#4b5563' }}>
+                {pendingFile?.name}
+              </p>
+
+              {/* Folder name input */}
+              <div className="mb-4">
+                <label className="text-xs font-bold uppercase tracking-widest mb-2 block" style={{ color: '#374151' }}>
+                  Nom du dossier
+                </label>
+                <input
+                  autoFocus
+                  value={folderNameInput}
+                  onChange={(e) => setFolderNameInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && folderNameInput.trim()) confirmFolder(); }}
+                  className="w-full px-4 py-3 rounded-xl text-sm font-semibold bg-transparent outline-none"
+                  style={{ background: '#09091a', border: '1px solid #2d2d5a', color: '#f0f0ff' }}
+                  placeholder="ex: Summer Campaign, Collab Nike..." />
+              </div>
+
+              <button
+                onClick={confirmFolder}
+                disabled={!folderNameInput.trim() || savingFolder}
+                className="w-full py-3 rounded-xl font-bold text-sm mb-2 transition-all"
+                style={{
+                  background: folderNameInput.trim() ? 'linear-gradient(135deg,#7c3aed,#4f46e5)' : '#1a1a32',
+                  color: folderNameInput.trim() ? 'white' : '#374151',
+                  boxShadow: folderNameInput.trim() ? '0 0 20px rgba(124,58,237,0.35)' : 'none',
+                }}>
+                {savingFolder ? '...' : '📁 Créer le dossier et continuer'}
+              </button>
+
+              <button onClick={confirmAlone}
+                className="w-full py-2.5 rounded-xl font-semibold text-sm transition-all"
+                style={{ background: '#09091a', border: '1px solid #1a1a32', color: '#6b7280' }}>
+                ⚡ Generate Alone — sans dossier
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Mirror Modal ────────────────────────────────────────────────────── */}
       {showMirrorModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4"
           style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}>
           <div className="w-full max-w-sm rounded-2xl border overflow-hidden"
             style={{ background: '#0c0c1e', borderColor: '#2d2d5a', boxShadow: '0 0 60px rgba(124,58,237,0.3)' }}>
-            {/* Header */}
             <div className="px-6 pt-6 pb-4">
               <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4"
                 style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)' }}>🪞</div>
               <p className="text-lg font-black text-center" style={{ color: '#f0f0ff' }}>Effet miroir ?</p>
               <p className="text-sm text-center mt-2" style={{ color: '#6b7280' }}>
                 Appliquer le miroir horizontal sur les variantes ?<br />
-                <span style={{ color: '#4b5563', fontSize: '11px' }}>
-                  Désactiver si la vidéo contient du texte visible.
-                </span>
+                <span style={{ color: '#4b5563', fontSize: '11px' }}>Désactiver si la vidéo contient du texte visible.</span>
               </p>
             </div>
-            {/* Buttons */}
             <div className="px-6 pb-6 grid grid-cols-2 gap-3">
-              <button
-                onClick={() => { setShowMirrorModal(false); handleCreate(false); }}
-                className="py-3 rounded-xl font-bold text-sm transition-all"
+              <button onClick={() => { setShowMirrorModal(false); handleCreate(false); }}
+                className="py-3 rounded-xl font-bold text-sm"
                 style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#9ca3af' }}>
                 ❌ Non, sans miroir
               </button>
-              <button
-                onClick={() => { setShowMirrorModal(false); handleCreate(true); }}
-                className="py-3 rounded-xl font-bold text-sm transition-all"
+              <button onClick={() => { setShowMirrorModal(false); handleCreate(true); }}
+                className="py-3 rounded-xl font-bold text-sm"
                 style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: 'white', boxShadow: '0 0 20px rgba(124,58,237,0.35)' }}>
                 🪞 Oui, mirror
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Folder Browser ──────────────────────────────────────────────────── */}
+      {showFolderBrowser && (
+        <FolderBrowser
+          folders={folders}
+          onClose={() => setShowFolderBrowser(false)}
+          onFoldersChange={setFolders}
+        />
       )}
     </div>
   );
