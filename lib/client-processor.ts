@@ -151,16 +151,16 @@ export function buildVideoFilters(p: TransformParams): string {
   vf.push(`crop=iw-${c * 2}:ih-${c * 2}:${c}:${c}`);
   vf.push(`scale=iw+${c * 2}:ih+${c * 2}`);
 
-  // 2. Zoom: scale up then center-crop
+  // 2. Zoom: scale up (even dims) then center-crop back (even dims)
   if (p.zoomFactor > 1.001) {
     const z = p.zoomFactor.toFixed(5);
-    vf.push(`scale=iw*${z}:ih*${z}`);
-    vf.push(`crop=iw/${z}:ih/${z}:(iw-iw/${z})/2:(ih-ih/${z})/2`);
+    vf.push(`scale=trunc(iw*${z}/2)*2:trunc(ih*${z}/2)*2`);
+    vf.push(`crop=trunc(iw/${z}/2)*2:trunc(ih/${z}/2)*2:(iw-trunc(iw/${z}/2)*2)/2:(ih-trunc(ih/${z}/2)*2)/2`);
   }
 
-  // 3. Rotation
+  // 3. Rotation — ow=iw:oh=ih keeps canvas size constant (no odd-dimension expansion)
   if (Math.abs(p.rotationRad) > 0.001) {
-    vf.push(`rotate=${p.rotationRad.toFixed(6)}:fillcolor=black`);
+    vf.push(`rotate=${p.rotationRad.toFixed(6)}:fillcolor=black:ow=iw:oh=ih`);
   }
 
   // 4. Hue + saturation
@@ -195,6 +195,10 @@ export function buildVideoFilters(p: TransformParams): string {
     vf.push('eq=brightness=0.001');
   }
 
+  // 9. Safety: force even dimensions — required by yuv420p/yuvj420p encoders.
+  //    Catches odd-dimension photos, fractional zoom remainders, rotate artifacts.
+  vf.push('scale=trunc(iw/2)*2:trunc(ih/2)*2');
+
   return vf.join(',');
 }
 
@@ -227,7 +231,8 @@ export function buildFFmpegArgs(
   if (!isImage && hasAudio && af) args.push('-af', af);
 
   if (isImage) {
-    args.push('-vframes', '1', '-q:v', '2');
+    // Explicit codec + pixel format required for WASM JPEG encoder stability
+    args.push('-vframes', '1', '-c:v', 'mjpeg', '-pix_fmt', 'yuvj420p', '-q:v', '2');
   } else {
     args.push(
       '-c:v', 'libx264',
