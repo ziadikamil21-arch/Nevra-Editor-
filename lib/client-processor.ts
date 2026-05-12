@@ -17,6 +17,7 @@ export interface TransformSummary {
   warmthStrength: number;
   invisibleText: boolean;
   vowb: boolean;
+  powb: boolean;
 }
 
 export interface ClientVariant {
@@ -44,6 +45,7 @@ interface TransformParams {
   warmthStrength: number;
   invisibleText: boolean;
   vowb: boolean;
+  powb: boolean;
   metadata: Record<string, string>;
 }
 
@@ -53,7 +55,7 @@ function randStr(len = 12) {
   return Array.from({ length: len }, () => Math.floor(Math.random() * 36).toString(36)).join('');
 }
 
-export function generateParams(quality: Quality, vowb = false): TransformParams {
+export function generateParams(quality: Quality, vowb = false, powb = false): TransformParams {
   const p: TransformParams = {
     cropPx: randInt(1, 2),
     zoomFactor: 1,
@@ -69,6 +71,7 @@ export function generateParams(quality: Quality, vowb = false): TransformParams 
     warmthStrength: 0,
     invisibleText: false,
     vowb,
+    powb,
     metadata: {
       title: randStr(16),
       comment: randStr(20),
@@ -124,6 +127,7 @@ export function paramsToSummary(p: TransformParams): TransformSummary {
     warmthStrength: parseFloat((p.warmthStrength * 100).toFixed(1)),
     invisibleText: p.invisibleText,
     vowb: p.vowb,
+    powb: p.powb,
   };
 }
 
@@ -132,8 +136,12 @@ export function buildVideoFilters(p: TransformParams): string {
 
   // 0. VOWB — place video on white background with caption space at bottom
   if (p.vowb) {
-    // Scale video to 86% of its size, center it on original-size white canvas
-    // Add ~200px white space at bottom for caption
+    vf.push('scale=trunc(iw*0.86/2)*2:trunc(ih*0.86/2)*2');
+    vf.push('pad=trunc(iw/0.86/2)*2:trunc((ih/0.86+200)/2)*2:(ow-iw)/2:trunc(ih*0.07):white');
+  }
+
+  // 0b. POWB — place photo on white background with caption space at bottom
+  if (p.powb) {
     vf.push('scale=trunc(iw*0.86/2)*2:trunc(ih*0.86/2)*2');
     vf.push('pad=trunc(iw/0.86/2)*2:trunc((ih/0.86+200)/2)*2:(ow-iw)/2:trunc(ih*0.07):white');
   }
@@ -152,7 +160,7 @@ export function buildVideoFilters(p: TransformParams): string {
 
   // 3. Rotation
   if (Math.abs(p.rotationRad) > 0.001) {
-    vf.push(`rotate=${p.rotationRad.toFixed(6)}:fillcolor=black@0`);
+    vf.push(`rotate=${p.rotationRad.toFixed(6)}:fillcolor=black`);
   }
 
   // 4. Hue + saturation
@@ -182,10 +190,9 @@ export function buildVideoFilters(p: TransformParams): string {
     vf.push(`setpts=${(1 / p.speedFactor).toFixed(6)}*PTS`);
   }
 
-  // 8. Invisible ghost text (1px, ~2% opacity)
+  // 8. Invisible brightness micro-shift (replaces drawtext — no font files needed in WASM)
   if (p.invisibleText) {
-    const txt = randStr(10);
-    vf.push(`drawtext=text='${txt}':fontcolor=white@0.02:fontsize=2:x=2:y=2`);
+    vf.push('eq=brightness=0.001');
   }
 
   return vf.join(',');
