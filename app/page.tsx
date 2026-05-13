@@ -536,8 +536,7 @@ export default function Home() {
   const [ffmpegReady, setFfmpegReady] = useState(false);
   const [ffmpegLoading, setFfmpegLoading] = useState(false);
   const [showMirrorModal, setShowMirrorModal] = useState(false);
-  const [showAudioModal, setShowAudioModal] = useState(false);
-  const [pendingMirrorChoice, setPendingMirrorChoice] = useState(false);
+  const [removeAudio, setRemoveAudio] = useState(false);
 
   // Folder system
   const [folders, setFolders] = useState<NevraFolder[]>([]);
@@ -1012,6 +1011,25 @@ export default function Home() {
           </div>
         </div>
 
+        {/* Audio toggle — video only, inline between variants and create */}
+        {activeMode === 'video' && (
+          <div className="mb-4 flex items-center justify-between px-4 py-2.5 rounded-2xl"
+            style={{ background: '#09091a', border: '1px solid #1a1a32' }}>
+            <div className="flex items-center gap-2">
+              <span className="text-base">{removeAudio ? '🔇' : '🔊'}</span>
+              <span className="text-xs font-semibold" style={{ color: '#9ca3af' }}>
+                {removeAudio ? 'No audio' : 'Keep audio'}
+              </span>
+            </div>
+            <button onClick={() => setRemoveAudio((v) => !v)}
+              className="relative w-10 h-5 rounded-full flex-shrink-0 transition-all duration-200"
+              style={{ background: removeAudio ? '#7c3aed' : '#1a1a32', border: '1px solid #2d2d5a' }}>
+              <div className="absolute top-0.5 w-4 h-4 rounded-full shadow transition-all duration-200"
+                style={{ background: 'white', left: removeAudio ? '22px' : '2px' }} />
+            </button>
+          </div>
+        )}
+
         {/* Create button */}
         <button
           className="btn-gradient w-full py-4 rounded-2xl font-bold text-base text-white tracking-widest uppercase"
@@ -1194,46 +1212,15 @@ export default function Home() {
               </p>
             </div>
             <div className="px-6 pb-6 grid grid-cols-2 gap-3">
-              <button onClick={() => { setShowMirrorModal(false); setPendingMirrorChoice(false); setShowAudioModal(true); }}
+              <button onClick={() => { setShowMirrorModal(false); handleCreate(false, removeAudio); }}
                 className="py-3 rounded-xl font-bold text-sm"
                 style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#9ca3af' }}>
                 ❌ No, without mirror
               </button>
-              <button onClick={() => { setShowMirrorModal(false); setPendingMirrorChoice(true); setShowAudioModal(true); }}
+              <button onClick={() => { setShowMirrorModal(false); handleCreate(true, removeAudio); }}
                 className="py-3 rounded-xl font-bold text-sm"
                 style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: 'white', boxShadow: '0 0 20px rgba(124,58,237,0.35)' }}>
                 🪞 Yes, mirror
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Audio Modal ─────────────────────────────────────────────────────── */}
-      {showAudioModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4"
-          style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}>
-          <div className="w-full max-w-sm rounded-2xl border overflow-hidden"
-            style={{ background: '#0c0c1e', borderColor: '#2d2d5a', boxShadow: '0 0 60px rgba(124,58,237,0.3)' }}>
-            <div className="px-6 pt-6 pb-4">
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4"
-                style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)' }}>🔊</div>
-              <p className="text-lg font-black text-center" style={{ color: '#f0f0ff' }}>Audio?</p>
-              <p className="text-sm text-center mt-2" style={{ color: '#6b7280' }}>
-                Keep the original audio or remove it?<br />
-                <span style={{ color: '#4b5563', fontSize: '11px' }}>Remove if you only need the visual content.</span>
-              </p>
-            </div>
-            <div className="px-6 pb-6 grid grid-cols-2 gap-3">
-              <button onClick={() => { setShowAudioModal(false); handleCreate(pendingMirrorChoice, true); }}
-                className="py-3 rounded-xl font-bold text-sm"
-                style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#9ca3af' }}>
-                🔇 Remove audio
-              </button>
-              <button onClick={() => { setShowAudioModal(false); handleCreate(pendingMirrorChoice, false); }}
-                className="py-3 rounded-xl font-bold text-sm"
-                style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: 'white', boxShadow: '0 0 20px rgba(124,58,237,0.35)' }}>
-                🔊 Keep audio
               </button>
             </div>
           </div>
