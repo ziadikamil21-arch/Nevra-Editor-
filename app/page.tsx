@@ -331,9 +331,11 @@ function FolderBrowser({ folders, onClose, onFoldersChange }: {
               )}
               {!openFolderId && (
                 <button onClick={() => { setShowCreate((v) => !v); setCreateName(''); }}
-                  className="w-8 h-8 rounded-xl flex items-center justify-center font-black text-lg transition-all hover:scale-110"
-                  style={{ background: showCreate ? 'rgba(124,58,237,0.25)' : 'rgba(124,58,237,0.12)', border: `1px solid ${showCreate ? '#7c3aed' : 'rgba(124,58,237,0.3)'}`, color: '#a78bfa' }}
-                  title="New folder">+</button>
+                  className="flex items-center gap-1.5 px-3 h-8 rounded-xl font-bold text-sm transition-all"
+                  style={{ background: showCreate ? 'rgba(124,58,237,0.3)' : 'linear-gradient(135deg,rgba(124,58,237,0.25),rgba(79,70,229,0.25))', border: `1px solid ${showCreate ? '#7c3aed' : 'rgba(124,58,237,0.5)'}`, color: '#a78bfa' }}>
+                  <span className="text-base font-black">+</span>
+                  <span>New Folder</span>
+                </button>
               )}
               <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center"
                 style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#9ca3af' }}>✕</button>
