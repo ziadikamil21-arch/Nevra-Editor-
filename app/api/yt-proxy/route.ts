@@ -3,19 +3,17 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
-function toFullYtUrl(raw: string): string {
+function extractVideoId(raw: string): string {
   try {
     const u = new URL(raw);
-    if (u.hostname === 'youtu.be') return `https://www.youtube.com/watch?v=${u.pathname.slice(1).split('?')[0]}`;
-    return raw;
+    if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('?')[0];
+    return u.searchParams.get('v') ?? '';
   } catch { return raw; }
 }
 
-async function streamFetch(url: string): Promise<NextResponse | null> {
+async function proxyFetch(url: string): Promise<NextResponse | null> {
   try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-    });
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (!res.ok || !res.body) return null;
     const headers: HeadersInit = { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' };
     const cl = res.headers.get('content-length');
@@ -24,43 +22,56 @@ async function streamFetch(url: string): Promise<NextResponse | null> {
   } catch { return null; }
 }
 
-const COBALT_INSTANCES = [
-  'https://api.cobalt.tools/',
-  'https://cobalt.api.lolcat.sh/',
-  'https://cobalt.api.onlix.me/',
+const PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://piped-api.privacy.com.de',
+  'https://pipedapi.adminforge.de',
 ];
 
 export async function GET(request: NextRequest) {
-  // ── Direct URL proxy (for cobalt redirect status) ────────────────────────
+  // ── Direct URL proxy (for redirect streams) ──────────────────────────────
   const directUrl = request.nextUrl.searchParams.get('direct');
   if (directUrl) {
-    const res = await streamFetch(directUrl);
+    const res = await proxyFetch(directUrl);
     if (res) return res;
-    return NextResponse.json({ error: 'Direct URL proxy failed' }, { status: 502 });
+    return NextResponse.json({ error: 'Direct URL failed' }, { status: 502 });
   }
 
   const v = request.nextUrl.searchParams.get('v') ?? '';
-  if (!v) return NextResponse.json({ error: 'Missing v param' }, { status: 400 });
+  if (!v) return NextResponse.json({ error: 'Missing v' }, { status: 400 });
 
-  const ytUrl = toFullYtUrl(v);
+  const videoId = extractVideoId(v);
+  if (!videoId) return NextResponse.json({ error: 'Invalid YouTube URL' }, { status: 400 });
+
   const errors: string[] = [];
 
-  // ── 1. cobalt.tools: try all instances (minimal request, no extra headers) ─
-  for (const instance of COBALT_INSTANCES) {
+  // ── Piped API: server-side fallback ────────────────────────────────────
+  for (const instance of PIPED_INSTANCES) {
     try {
-      const cobaltRes = await fetch(instance, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ url: ytUrl }),
+      const infoRes = await fetch(`${instance}/streams/${videoId}`, {
+        headers: { 'Accept': 'application/json' },
       });
-      if (!cobaltRes.ok) { errors.push(`${instance}→${cobaltRes.status}`); continue; }
-      const data = await cobaltRes.json() as { status: string; url?: string; error?: { code: string } };
-      if (!data.url || data.status === 'error') { errors.push(`${instance}→${data.status}`); continue; }
-      const res = await streamFetch(data.url);
+      if (!infoRes.ok) { errors.push(`${instance} → ${infoRes.status}`); continue; }
+
+      const info = await infoRes.json() as {
+        videoStreams: Array<{ url: string; quality: string; mimeType: string; videoOnly?: boolean }>;
+      };
+      const streams = info.videoStreams ?? [];
+      const stream = streams.find(s => s.quality === '360p' && !s.videoOnly)
+        ?? streams.find(s => s.quality === '480p' && !s.videoOnly)
+        ?? streams.find(s => !s.videoOnly && s.mimeType?.includes('mp4'))
+        ?? streams[0];
+
+      if (!stream?.url) { errors.push(`${instance}: no stream`); continue; }
+
+      const res = await proxyFetch(stream.url);
       if (res) return res;
-      errors.push(`${instance} stream failed`);
+      errors.push(`${instance} stream proxy failed`);
     } catch (e) { errors.push(`${instance}: ${e}`); }
   }
 
-  return NextResponse.json({ error: `Download failed. Server errors: ${errors.join(' | ')}` }, { status: 502 });
+  return NextResponse.json(
+    { error: `Server download failed: ${errors.join(' | ')}` },
+    { status: 502 },
+  );
 }

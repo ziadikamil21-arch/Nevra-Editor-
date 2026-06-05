@@ -134,87 +134,9 @@ function detectTopicKey(text: string): TopicKey {
   return 'general';
 }
 
-// ── Hook pools per topic — varied, never the same twice ───────────────────
-// null = no text overlay needed for this clip
-
-const HOOK_POOLS: Record<TopicKey, Array<{ fr: string | null; en: string | null }>> = {
-  car: [
-    { fr: 'Imagine ça dans ton garage 🤯',            en: 'Imagine waking up to this 🤯' },
-    { fr: 'Le son seul vaut le détour 🔊',            en: 'That sound though 🔊' },
-    { fr: null,                                        en: null },
-    { fr: 'Personne te parle de ça en France',        en: 'Nobody talks about this' },
-    { fr: 'La réaction dit tout 😱',                  en: 'The reaction says it all 😱' },
-    { fr: 'T\'as entendu ce bruit ?',                 en: 'Did you hear that?' },
-    { fr: '300 000€ en pleine rue 👀',                en: 'That price though 👀' },
-    { fr: 'Ce moment qui change tout 🔥',             en: 'The moment that changes everything 🔥' },
-  ],
-  money: [
-    { fr: 'Personne te dit ça sur l\'argent',         en: 'Nobody tells you this about money' },
-    { fr: 'Combien ça rapporte vraiment ? 💸',        en: 'How much does it actually make? 💸' },
-    { fr: null,                                        en: null },
-    { fr: 'La vérité sur les revenus passifs',        en: 'The truth about passive income' },
-    { fr: 'Ce que j\'aurais voulu savoir avant 💰',   en: 'What I wish I knew sooner 💰' },
-    { fr: 'La majorité des gens font cette erreur',   en: 'Most people get this wrong' },
-  ],
-  fitness: [
-    { fr: 'Ce que personne ne fait à la salle',       en: 'What nobody does at the gym' },
-    { fr: 'Avant / après en 30 jours 🔥',             en: '30 day transformation 🔥' },
-    { fr: null,                                        en: null },
-    { fr: 'Le vrai secret pour progresser 💪',        en: 'The real secret to progress 💪' },
-    { fr: 'Tu fais encore cette erreur ?',             en: 'Are you still making this mistake?' },
-  ],
-  food: [
-    { fr: 'La recette que tout le monde cherche 👨‍🍳', en: 'The recipe everyone\'s looking for 👨‍🍳' },
-    { fr: 'Mon chef secret 🤫',                       en: 'My secret ingredient 🤫' },
-    { fr: null,                                        en: null },
-    { fr: 'Ready in under 10 minutes ?',              en: 'Ready in 10 min — no excuses' },
-  ],
-  travel: [
-    { fr: 'Endroit que 99% ne connaissent pas 🌍',    en: '99% of people don\'t know this place 🌍' },
-    { fr: 'Ce que les agences ne te montrent pas',    en: 'What travel agencies don\'t show you' },
-    { fr: null,                                        en: null },
-    { fr: 'On a tout perdu et... 😱',                 en: 'We lost everything and... 😱' },
-    { fr: 'Le moment qui a tout changé ✈️',           en: 'The moment that changed everything ✈️' },
-  ],
-  tech: [
-    { fr: 'L\'IA que personne ne connaît encore',     en: 'The AI tool nobody knows yet' },
-    { fr: 'Ça remplace un emploi entier ?',           en: 'This replaces an entire job?' },
-    { fr: null,                                        en: null },
-    { fr: 'J\'ai testé pendant 30 jours...',          en: 'I tested this for 30 days...' },
-  ],
-  fashion: [
-    { fr: 'La tenue que tout le monde m\'a demandée', en: 'Everyone asked about this outfit' },
-    { fr: 'Budget: moins de 50€ 🛍️',                 en: 'Under $50 total 🛍️' },
-    { fr: null,                                        en: null },
-    { fr: 'La tendance avant qu\'elle explose 🔥',    en: 'The trend before it blows up 🔥' },
-  ],
-  relationship: [
-    { fr: 'Ce que personne ne te dit sur les couples', en: 'What nobody tells you about relationships' },
-    { fr: 'Red flag ou pas ? 🚩',                     en: 'Red flag or not? 🚩' },
-    { fr: null,                                        en: null },
-    { fr: 'La question qui change tout...',           en: 'The question that changes everything...' },
-  ],
-  music: [
-    { fr: 'La prod que tout le monde cherche 🎵',     en: 'The beat everyone\'s looking for 🎵' },
-    { fr: null,                                        en: null },
-    { fr: 'Reconnais-tu ce sample ?',                 en: 'Do you recognize this sample?' },
-    { fr: 'Ce son va te rester dans la tête 🔊',      en: 'This will be stuck in your head 🔊' },
-  ],
-  general: [
-    { fr: 'Le passage qui va tout changer 👀',        en: 'The part that changes everything 👀' },
-    { fr: null,                                        en: null },
-    { fr: 'Personne n\'en parle mais...',             en: 'Nobody talks about this but...' },
-    { fr: 'Ce moment là... 😱',                       en: 'This moment right here... 😱' },
-    { fr: 'La réalité que peu connaissent',           en: 'The reality most don\'t know' },
-    { fr: 'Attends jusqu\'à la fin ⏳',               en: 'Wait for the end ⏳' },
-  ],
-};
-
-function pickTopicHook(topicKey: TopicKey, index: number, lang: 'fr' | 'en'): string | null {
-  const pool = HOOK_POOLS[topicKey];
-  const entry = pool[index % pool.length];
-  return (lang === 'fr' ? entry.fr : entry.en) ?? null;
-}
+// No predefined hook templates — hooks ONLY come from the actual transcript.
+// Without transcript we return null (no hook). Better to have no hook than
+// a robotic generic one that has nothing to do with the clip content.
 
 // ── Hashtag builder ────────────────────────────────────────────────────────
 
@@ -388,15 +310,8 @@ function buildClipSegment(
   const placement = placements[idx % 3];
   const topicKey = detectTopicKey((w.text || '') + ' ' + title);
 
-  // Hook: try transcript first, fall back to topic-based pool hook
-  let hook: string | null = null;
-  if (hasTranscript && w.text) {
-    hook = extractBestHook(w.text);
-  }
-  // If no good hook found in transcript (or no transcript), use topic pool — always varied
-  if (!hook) {
-    hook = pickTopicHook(topicKey, idx, lang);
-  }
+  // Hook: extract from actual transcript only. No templates — null if nothing good.
+  const hook: string | null = (hasTranscript && w.text) ? extractBestHook(w.text) : null;
 
   const hashtags = buildHashtags(w.text || '', title, lang);
   const caption = buildCaption(hook, w.text || title, hashtags, lang);
