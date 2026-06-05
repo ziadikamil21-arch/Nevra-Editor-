@@ -3,15 +3,20 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
+function toYtUrl(raw: string): string {
+  if (raw.startsWith('http')) return raw;
+  return `https://www.youtube.com/watch?v=${raw}`;
+}
+
 export async function GET(request: NextRequest) {
-  const videoId = request.nextUrl.searchParams.get('v');
-  if (!videoId) return NextResponse.json({ error: 'Missing v' }, { status: 400 });
+  const v = request.nextUrl.searchParams.get('v');
+  if (!v) return NextResponse.json({ error: 'Missing v' }, { status: 400 });
 
   try {
     // Dynamically import so it's not bundled client-side
     const ytdl = (await import('@distube/ytdl-core')).default;
 
-    const url = `https://www.youtube.com/watch?v=${videoId}`;
+    const url = toYtUrl(v);
 
     // Get formats — prefer 360p MP4 with audio (itag 18) for reasonable file size
     const info = await ytdl.getInfo(url);
