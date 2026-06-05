@@ -11,8 +11,9 @@ import {
   getVariantsByFolder, saveVariant, deleteVariant,
   type NevraFolder, type NevraVariant,
 } from '@/lib/storage';
+import type { ClipSegment, YTInfo } from '@/lib/yt-analyzer';
 
-type FileMode = 'video' | 'photo';
+type FileMode = 'video' | 'photo' | 'youtube';
 
 const QUALITY_CONFIG = {
   normal: {
@@ -139,6 +140,127 @@ function VariantCard({ v, onDelete, onDownload, savedToFolder }: {
           <button onClick={onDownload} className="w-full flex items-center justify-center gap-2 text-sm font-bold py-2.5 rounded-xl"
             style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: 'white' }}>
             ⬇ Download Variant {v.index + 1}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── YouTube Clip Card ──────────────────────────────────────────────────────
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button onClick={() => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+      className="text-[10px] px-2 py-0.5 rounded-md font-bold transition-all flex-shrink-0"
+      style={{ background: copied ? 'rgba(16,185,129,0.15)' : 'rgba(124,58,237,0.12)', color: copied ? '#10b981' : '#a78bfa', border: `1px solid ${copied ? 'rgba(16,185,129,0.3)' : 'rgba(124,58,237,0.3)'}` }}>
+      {copied ? '✓ Copied' : 'Copy'}
+    </button>
+  );
+}
+
+function YTClipCard({ clip, blobUrl, isProcessing, onDownload }: {
+  clip: ClipSegment; blobUrl: string | null; isProcessing: boolean; onDownload: () => void;
+}) {
+  const [showInstructions, setShowInstructions] = useState(false);
+  const stars = clip.score >= 10 ? '⭐⭐⭐⭐⭐' : clip.score >= 7 ? '⭐⭐⭐⭐' : clip.score >= 4 ? '⭐⭐⭐' : clip.score >= 2 ? '⭐⭐' : '⭐';
+  const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+  return (
+    <div className="rounded-2xl border overflow-hidden" style={{ background: '#0c0c1e', borderColor: blobUrl ? '#2d2d5a' : '#1a1a32' }}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: '#1a1a32' }}>
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black"
+            style={{ background: 'rgba(124,58,237,0.2)', color: '#a78bfa' }}>{clip.index + 1}</div>
+          <div>
+            <p className="text-sm font-bold" style={{ color: '#f0f0ff' }}>
+              {fmtTime(clip.start)} → {fmtTime(clip.end)}
+              <span className="ml-2 text-xs font-normal" style={{ color: '#4b5563' }}>{clip.duration.toFixed(0)}s</span>
+            </p>
+            <p className="text-[10px]" style={{ color: '#374151' }}>{stars} Engagement score</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {isProcessing && (
+            <div className="flex items-center gap-1" style={{ color: '#7c3aed' }}>
+              <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+              </svg>
+              <span className="text-xs">Cutting...</span>
+            </div>
+          )}
+          {blobUrl && <span className="text-xs font-bold" style={{ color: '#10b981' }}>✓ Ready</span>}
+        </div>
+      </div>
+
+      {/* TikTok instructions toggle */}
+      <button onClick={() => setShowInstructions(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-left transition-all"
+        style={{ background: 'rgba(124,58,237,0.04)', borderBottom: showInstructions ? '1px solid #1a1a32' : 'none' }}>
+        <span className="text-xs font-bold" style={{ color: '#a78bfa' }}>📱 TikTok Strategy</span>
+        <span className="text-xs" style={{ color: '#374151' }}>{showInstructions ? '▲' : '▼'}</span>
+      </button>
+
+      {showInstructions && (
+        <div className="px-4 py-3 space-y-3">
+          {/* Hook */}
+          <div className="rounded-xl p-3" style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.15)' }}>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#fbbf24' }}>🪝 Hook — First 3 seconds (big text overlay)</p>
+              <CopyButton text={clip.hook} />
+            </div>
+            <p className="text-sm font-bold" style={{ color: '#f0f0ff' }}>"{clip.hook}"</p>
+            <p className="text-[10px] mt-1" style={{ color: '#6b7280' }}>Position: <strong style={{color:'#d1d5db'}}>{clip.textPlacement.toUpperCase()}</strong> of screen · Bold white · Black outline</p>
+          </div>
+
+          {/* Caption */}
+          <div className="rounded-xl p-3" style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.2)' }}>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#a78bfa' }}>📝 Full Caption (paste in TikTok description)</p>
+              <CopyButton text={clip.caption} />
+            </div>
+            <p className="text-xs leading-relaxed whitespace-pre-line" style={{ color: '#9ca3af' }}>{clip.caption}</p>
+          </div>
+
+          {/* Hashtags */}
+          <div className="rounded-xl p-3" style={{ background: 'rgba(16,185,129,0.05)', border: '1px solid rgba(16,185,129,0.15)' }}>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#10b981' }}>#️⃣ Hashtags</p>
+              <CopyButton text={clip.hashtags} />
+            </div>
+            <p className="text-xs" style={{ color: '#6b7280' }}>{clip.hashtags}</p>
+          </div>
+
+          {/* Call to action */}
+          <div className="rounded-xl p-3" style={{ background: 'rgba(251,146,60,0.05)', border: '1px solid rgba(251,146,60,0.15)' }}>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#fb923c' }}>🎯 Call to Action (end of clip)</p>
+              <CopyButton text={clip.callToAction} />
+            </div>
+            <p className="text-sm font-bold" style={{ color: '#f0f0ff' }}>"{clip.callToAction}"</p>
+          </div>
+
+          {/* Checklist */}
+          <div className="rounded-xl p-3 space-y-1.5" style={{ background: '#09091a', border: '1px solid #1a1a32' }}>
+            <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: '#374151' }}>✅ Before posting checklist</p>
+            {clip.checklist.map((item, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className="text-xs mt-0.5 flex-shrink-0" style={{ color: '#4b5563' }}>☐</span>
+                <span className="text-xs leading-relaxed" style={{ color: '#6b7280' }}>{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Download */}
+      {blobUrl && (
+        <div className="px-3 pb-3 pt-2">
+          <button onClick={onDownload} className="w-full flex items-center justify-center gap-2 text-sm font-bold py-2.5 rounded-xl"
+            style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: 'white' }}>
+            ⬇ Download Clip {clip.index + 1}
           </button>
         </div>
       )}
@@ -550,6 +672,18 @@ export default function Home() {
   const [selectedExistingFolderId, setSelectedExistingFolderId] = useState<string | null>(null);
   const [showFolderBrowser, setShowFolderBrowser] = useState(false);
 
+  // ── YouTube state ──────────────────────────────────────────────────────────
+  const [ytUrl, setYtUrl] = useState('');
+  const [ytClipCount, setYtClipCount] = useState(10);
+  const [ytAnalyzing, setYtAnalyzing] = useState(false);
+  const [ytInfo, setYtInfo] = useState<YTInfo | null>(null);
+  const [ytError, setYtError] = useState<string | null>(null);
+  const [ytDownloading, setYtDownloading] = useState(false);
+  const [ytDownloadPct, setYtDownloadPct] = useState(0);
+  const [ytClipBlobs, setYtClipBlobs] = useState<Record<number, string>>({});   // index → blobUrl
+  const [ytClipProcessing, setYtClipProcessing] = useState<Set<number>>(new Set());
+  const [ytVideoBlob, setYtVideoBlob] = useState<Blob | null>(null);
+
   const ffVideoRef = useRef<import('@ffmpeg/ffmpeg').FFmpeg | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoResultsRef = useRef<HTMLDivElement>(null);
@@ -672,6 +806,108 @@ export default function Home() {
   };
 
   const switchMode = (mode: FileMode) => { setActiveMode(mode); setError(null); };
+
+  // ── YouTube: analyze ──────────────────────────────────────────────────────
+  const handleYtAnalyze = async () => {
+    if (!ytUrl.trim()) return;
+    setYtAnalyzing(true);
+    setYtError(null);
+    setYtInfo(null);
+    setYtClipBlobs({});
+    setYtVideoBlob(null);
+    try {
+      const res = await fetch(`/api/yt-info?url=${encodeURIComponent(ytUrl.trim())}&count=${ytClipCount}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Analysis failed');
+      setYtInfo(data);
+    } catch (e) {
+      setYtError(String(e));
+    } finally {
+      setYtAnalyzing(false);
+    }
+  };
+
+  // ── YouTube: download full video then cut clips ────────────────────────
+  const handleYtCutClips = async () => {
+    if (!ytInfo || !ffmpegReady) return;
+    setYtDownloading(true);
+    setYtDownloadPct(0);
+    setYtClipBlobs({});
+    setYtError(null);
+
+    try {
+      // 1. Download video via proxy
+      const res = await fetch(`/api/yt-proxy?v=${ytInfo.videoId}`);
+      if (!res.ok) throw new Error('Download failed — try again');
+
+      const reader = res.body!.getReader();
+      const totalStr = res.headers.get('content-length');
+      const total = totalStr ? parseInt(totalStr) : 0;
+      const chunks: Uint8Array[] = [];
+      let received = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        if (total > 0) setYtDownloadPct(Math.round((received / total) * 100));
+      }
+      setYtDownloadPct(100);
+
+      const videoBlob = new Blob(chunks as BlobPart[], { type: 'video/mp4' });
+      setYtVideoBlob(videoBlob);
+
+      // 2. Load into FFmpeg FS
+      const ff = ffVideoRef.current!;
+      const { fetchFile } = await import('@ffmpeg/util');
+      const inputName = 'yt_input.mp4';
+      await ff.writeFile(inputName, await fetchFile(videoBlob));
+
+      // 3. Cut each clip with fast copy (no re-encode)
+      for (const clip of ytInfo.clips) {
+        setYtClipProcessing(p => new Set([...p, clip.index]));
+        const outputName = `yt_clip_${clip.index + 1}.mp4`;
+        try {
+          await ff.exec([
+            '-ss', String(clip.start),
+            '-i', inputName,
+            '-t', String(clip.duration),
+            '-c', 'copy',
+            '-movflags', '+faststart',
+            outputName,
+          ]);
+          const raw = await ff.readFile(outputName);
+          const blob = new Blob([raw as unknown as BlobPart], { type: 'video/mp4' });
+          const blobUrl = URL.createObjectURL(blob);
+          setYtClipBlobs(p => ({ ...p, [clip.index]: blobUrl }));
+          try { await ff.deleteFile(outputName); } catch { /* ok */ }
+        } catch (clipErr) {
+          console.error(`Clip ${clip.index + 1} failed:`, clipErr);
+        }
+        setYtClipProcessing(p => { const n = new Set(p); n.delete(clip.index); return n; });
+      }
+      try { await ff.deleteFile(inputName); } catch { /* ok */ }
+    } catch (e) {
+      setYtError(String(e));
+    } finally {
+      setYtDownloading(false);
+    }
+  };
+
+  const ytDownloadClip = (idx: number) => {
+    const url = ytClipBlobs[idx];
+    if (!url || !ytInfo) return;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${ytInfo.title.replace(/[^a-z0-9]/gi, '_')}_clip_${idx + 1}.mp4`;
+    a.click();
+  };
+
+  const ytDownloadAllClips = () => {
+    if (!ytInfo) return;
+    ytInfo.clips.forEach(c => { if (ytClipBlobs[c.index]) ytDownloadClip(c.index); });
+  };
 
   // ── Create variants ────────────────────────────────────────────────────────
   const handleCreate = async (mirrorChoice?: boolean, removeAudio = false) => {
@@ -803,19 +1039,20 @@ export default function Home() {
         {/* Mode toggle */}
         <div className="flex justify-center mb-5">
           <div className="flex rounded-2xl p-1 gap-1" style={{ background: '#0d0d1e', border: '1px solid #1c1c3a' }}>
-            {(['video', 'photo'] as FileMode[]).map((m) => {
+            {(['video', 'photo', 'youtube'] as FileMode[]).map((m) => {
               const sel = activeMode === m;
-              const hasFile = m === 'video' ? !!videoFile : !!photoFile;
-              const proc = m === 'video' ? videoIsProcessing : photoIsProcessing;
+              const hasFile = m === 'video' ? !!videoFile : m === 'photo' ? !!photoFile : !!ytInfo;
+              const proc = m === 'video' ? videoIsProcessing : m === 'photo' ? photoIsProcessing : ytDownloading;
+              const label = m === 'video' ? '🎬  Video' : m === 'photo' ? '🖼️  Photo' : '📺  YouTube';
               return (
                 <button key={m} onClick={() => switchMode(m)}
-                  className="relative px-6 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200"
+                  className="relative px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200"
                   style={{
                     background: sel ? 'linear-gradient(135deg,#7c3aed,#4f46e5)' : 'transparent',
                     color: sel ? 'white' : '#6b7280',
                     boxShadow: sel ? '0 2px 15px rgba(124,58,237,0.35)' : 'none',
                   }}>
-                  {m === 'video' ? '🎬  Video' : '🖼️  Photo'}
+                  {label}
                   {!sel && (hasFile || proc) && (
                     <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full"
                       style={{ background: proc ? '#f59e0b' : '#10b981' }} />
@@ -826,8 +1063,133 @@ export default function Home() {
           </div>
         </div>
 
+        {/* ── YouTube section ──────────────────────────────────────────────── */}
+        {activeMode === 'youtube' && (
+          <div className="mb-5">
+            {/* URL input */}
+            <div className="rounded-2xl border p-4 mb-4" style={{ background: '#09091a', borderColor: '#1a1a32' }}>
+              <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: '#374151' }}>YouTube URL</p>
+              <div className="flex gap-2">
+                <input
+                  value={ytUrl}
+                  onChange={e => setYtUrl(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleYtAnalyze(); }}
+                  placeholder="https://youtube.com/watch?v=..."
+                  className="flex-1 px-3 py-2.5 rounded-xl text-sm bg-transparent outline-none"
+                  style={{ background: '#0c0c1e', border: '1px solid #2d2d5a', color: '#f0f0ff' }}
+                />
+              </div>
+              {/* Clip count */}
+              <div className="flex items-center justify-between mt-3">
+                <p className="text-xs font-semibold" style={{ color: '#6b7280' }}>Number of clips to extract</p>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setYtClipCount(c => Math.max(1, c - 1))}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center font-bold"
+                    style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#9ca3af' }}>−</button>
+                  <span className="w-8 text-center font-black text-lg gradient-text">{ytClipCount}</span>
+                  <button onClick={() => setYtClipCount(c => Math.min(30, c + 1))}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center font-bold"
+                    style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#9ca3af' }}>+</button>
+                </div>
+              </div>
+            </div>
+
+            {/* Analyze button */}
+            <button onClick={handleYtAnalyze} disabled={!ytUrl.trim() || ytAnalyzing}
+              className="w-full py-3.5 rounded-2xl font-bold text-sm uppercase tracking-widest mb-4 transition-all"
+              style={{
+                background: ytUrl.trim() ? 'linear-gradient(135deg,#dc2626,#b91c1c)' : '#1a1a32',
+                color: ytUrl.trim() ? 'white' : '#374151',
+                boxShadow: ytUrl.trim() ? '0 0 20px rgba(220,38,38,0.3)' : 'none',
+              }}>
+              {ytAnalyzing ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                  Analyzing video...
+                </span>
+              ) : '🎯  Find Best Clips'}
+            </button>
+
+            {ytError && (
+              <div className="mb-4 px-4 py-3 rounded-xl text-sm" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#fca5a5' }}>
+                ⚠️ {ytError}
+              </div>
+            )}
+
+            {/* Video info + download */}
+            {ytInfo && (
+              <>
+                <div className="rounded-2xl border p-4 mb-4 flex items-center gap-4" style={{ background: '#0c0c1e', borderColor: '#2d2d5a' }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={ytInfo.thumbnail} alt="" className="w-20 h-14 rounded-xl object-cover flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold truncate" style={{ color: '#f0f0ff' }}>{ytInfo.title}</p>
+                    <p className="text-xs mt-0.5" style={{ color: '#4b5563' }}>
+                      {Math.floor(ytInfo.duration / 60)}min {ytInfo.duration % 60}s ·{' '}
+                      {ytInfo.hasTranscript ? '✅ Transcript found — AI scored clips' : '⚡ No transcript — even distribution'}
+                    </p>
+                    <p className="text-xs mt-1" style={{ color: '#7c3aed' }}>{ytInfo.clips.length} clips identified</p>
+                  </div>
+                </div>
+
+                {/* Cut clips button */}
+                {!ytDownloading && Object.keys(ytClipBlobs).length === 0 && (
+                  <button onClick={handleYtCutClips} disabled={!ffmpegReady}
+                    className="btn-gradient w-full py-3.5 rounded-2xl font-bold text-base text-white tracking-widest uppercase mb-4">
+                    {!ffmpegReady ? 'Loading engine...' : `⚡  Download & Cut ${ytInfo.clips.length} Clips`}
+                  </button>
+                )}
+
+                {/* Download progress */}
+                {ytDownloading && ytDownloadPct < 100 && (
+                  <div className="mb-4 rounded-2xl border p-4" style={{ background: '#09091a', borderColor: '#1a1a32' }}>
+                    <div className="flex justify-between text-xs mb-2" style={{ color: '#6b7280' }}>
+                      <span>Downloading video...</span>
+                      <span className="font-bold tabular-nums" style={{ color: '#7c3aed' }}>{ytDownloadPct}%</span>
+                    </div>
+                    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: '#1a1a32' }}>
+                      <div className="h-full rounded-full transition-all duration-300"
+                        style={{ width: `${ytDownloadPct}%`, background: 'linear-gradient(90deg,#7c3aed,#a78bfa)' }} />
+                    </div>
+                  </div>
+                )}
+                {ytDownloading && ytDownloadPct === 100 && (
+                  <div className="mb-4 px-4 py-2.5 rounded-xl text-xs font-semibold" style={{ background: 'rgba(124,58,237,0.1)', color: '#a78bfa', border: '1px solid rgba(124,58,237,0.2)' }}>
+                    ✂️ Cutting clips with FFmpeg...
+                  </div>
+                )}
+
+                {/* Download all button */}
+                {Object.keys(ytClipBlobs).length > 1 && (
+                  <button onClick={ytDownloadAllClips}
+                    className="w-full py-3 rounded-2xl font-bold text-sm mb-4"
+                    style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.3)', color: '#a78bfa' }}>
+                    ⬇ Download All {Object.keys(ytClipBlobs).length} Clips
+                  </button>
+                )}
+
+                {/* Clip cards */}
+                <div className="space-y-3">
+                  {ytInfo.clips.map(clip => (
+                    <YTClipCard
+                      key={clip.index}
+                      clip={clip}
+                      blobUrl={ytClipBlobs[clip.index] ?? null}
+                      isProcessing={ytClipProcessing.has(clip.index)}
+                      onDownload={() => ytDownloadClip(clip.index)}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Drop zone */}
-        <div
+        {activeMode !== 'youtube' && <div
           className={`rounded-2xl border-2 border-dashed cursor-pointer mb-5 transition-all duration-200 ${isDragging ? 'drop-active' : ''}`}
           style={{ borderColor: file ? '#3d2b6e' : '#1a1a32', background: file ? 'rgba(124,58,237,0.04)' : '#09091a' }}
           onDrop={(e) => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
@@ -880,8 +1242,9 @@ export default function Home() {
               </div>
             </div>
           )}
-        </div>
+        </div>}
 
+        {activeMode !== 'youtube' && <>
         {/* VOWB toggle */}
         {activeMode === 'video' && (
           <div className="mb-5">
@@ -1046,6 +1409,7 @@ export default function Home() {
           ) : (activeMode === 'video' && !ffmpegReady) ? 'Loading engine...'
             : `⚡  Create ${variantCount} Variant${variantCount !== 1 ? 's' : ''}`}
         </button>
+        </>}
 
         {/* Results */}
         <ResultsSection label="Video Results" icon="🎬"
