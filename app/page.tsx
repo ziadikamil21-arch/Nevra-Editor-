@@ -834,63 +834,78 @@ export default function Home() {
   const getYtVideoBlob = async (url: string): Promise<Blob> => {
     const errors: string[] = [];
 
-    // ── Attempt 1: cobalt.tools directly from browser ────────────────────
-    // Only use "tunnel" status (proxied through cobalt's servers, no IP block).
-    // "redirect" status = direct YouTube CDN URL = CORS/IP problem, skip it.
+    // Convert youtu.be short URLs to full URL for cobalt
+    let ytFullUrl = url;
     try {
-      const cobaltRes = await fetch('https://api.cobalt.tools/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Origin': 'https://cobalt.tools',
-        },
-        body: JSON.stringify({ url, videoQuality: '360' }),
-      });
-      if (!cobaltRes.ok) {
-        errors.push(`cobalt API ${cobaltRes.status}`);
-      } else {
-        const data = await cobaltRes.json() as { status: string; url?: string; error?: { code: string } };
-        if (data.status === 'error') {
-          errors.push(`cobalt error: ${data.error?.code ?? 'unknown'}`);
-        } else if (data.status === 'tunnel' && data.url) {
-          // Tunnel = cobalt proxies the bytes (no CORS/IP issue)
-          const videoRes = await fetch(data.url);
+      const u = new URL(url);
+      if (u.hostname === 'youtu.be') {
+        ytFullUrl = `https://www.youtube.com/watch?v=${u.pathname.slice(1).split('?')[0]}`;
+      }
+    } catch { /* keep as-is */ }
+
+    // ── cobalt.tools: try multiple public instances in parallel ──────────
+    // Key: minimal request body (just url), no extra headers that cause 400.
+    // Only accept tunnel/stream status (cobalt proxies bytes — no CORS/IP issue).
+    // For redirect status (direct YouTube CDN), route through our server proxy.
+    const COBALT_INSTANCES = [
+      'https://api.cobalt.tools/',
+      'https://cobalt.api.lolcat.sh/',
+      'https://cobalt.api.onlix.me/',
+    ];
+
+    const cobaltResult = await Promise.any(
+      COBALT_INSTANCES.map(async (instance) => {
+        const res = await fetch(instance, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ url: ytFullUrl }),
+        });
+        if (!res.ok) throw new Error(`${instance} → ${res.status}`);
+        const data = await res.json() as { status: string; url?: string; error?: { code: string } };
+        if (data.status === 'error' || !data.url) throw new Error(`${instance} → ${data.status} ${data.error?.code ?? ''}`);
+        return data;
+      })
+    ).catch((e: AggregateError) => {
+      errors.push(...(e.errors as Error[]).map(err => err.message));
+      return null;
+    });
+
+    if (cobaltResult?.url) {
+      const { status, url: videoUrl } = cobaltResult;
+      if (status === 'tunnel' || status === 'stream') {
+        try {
+          const videoRes = await fetch(videoUrl!);
           if (videoRes.ok && videoRes.body) {
             const chunks = await ytStreamWithProgress(videoRes);
             return new Blob(chunks as BlobPart[], { type: 'video/mp4' });
           }
-          errors.push(`cobalt tunnel fetch failed: ${videoRes.status}`);
-        } else if (data.status === 'redirect' && data.url) {
-          // Redirect = direct YouTube CDN URL — route through our server proxy
-          const proxyRedirectRes = await fetch(`/api/yt-proxy?direct=${encodeURIComponent(data.url)}`);
-          if (proxyRedirectRes.ok && proxyRedirectRes.body) {
-            const chunks = await ytStreamWithProgress(proxyRedirectRes);
+          errors.push(`cobalt tunnel fetch ${videoRes.status}`);
+        } catch (e) { errors.push(`cobalt tunnel: ${e}`); }
+      } else if (status === 'redirect') {
+        // Direct CDN URL — proxy via server to avoid CORS
+        try {
+          const proxyRes = await fetch(`/api/yt-proxy?direct=${encodeURIComponent(videoUrl!)}`);
+          if (proxyRes.ok && proxyRes.body) {
+            const chunks = await ytStreamWithProgress(proxyRes);
             return new Blob(chunks as BlobPart[], { type: 'video/mp4' });
           }
-          errors.push(`redirect proxy failed: ${proxyRedirectRes.status}`);
-        } else {
-          errors.push(`cobalt unexpected status: ${data.status}`);
-        }
+          errors.push(`redirect proxy ${proxyRes.status}`);
+        } catch (e) { errors.push(`redirect proxy: ${e}`); }
       }
-    } catch (e) {
-      errors.push(`cobalt exception: ${e}`);
     }
 
-    // ── Attempt 2: server proxy (ytdl-core fallback) ─────────────────────
+    // ── Server proxy final fallback ───────────────────────────────────────
     try {
-      const proxyRes = await fetch(`/api/yt-proxy?v=${encodeURIComponent(url)}`);
+      const proxyRes = await fetch(`/api/yt-proxy?v=${encodeURIComponent(ytFullUrl)}`);
       if (proxyRes.ok && proxyRes.body) {
         const chunks = await ytStreamWithProgress(proxyRes);
         return new Blob(chunks as BlobPart[], { type: 'video/mp4' });
       }
       const errData = await proxyRes.json().catch(() => ({})) as { error?: string };
-      errors.push(`server proxy: ${errData.error ?? proxyRes.status}`);
-    } catch (e) {
-      errors.push(`server proxy exception: ${e}`);
-    }
+      errors.push(`server: ${errData.error ?? proxyRes.status}`);
+    } catch (e) { errors.push(`server: ${e}`); }
 
-    throw new Error(`Download failed. Details: ${errors.join(' | ')}`);
+    throw new Error(`Download failed — ${errors.slice(0, 3).join(' | ')}`);
   };
 
   // ── YouTube: ONE click → analyze + download + cut ─────────────────────
