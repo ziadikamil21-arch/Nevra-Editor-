@@ -205,15 +205,22 @@ function YTClipCard({ clip, blobUrl, isProcessing, onDownload }: {
 
       {showInstructions && (
         <div className="px-4 py-3 space-y-3">
-          {/* Hook */}
-          <div className="rounded-xl p-3" style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.15)' }}>
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#fbbf24' }}>🪝 Hook — First 3 seconds (big text overlay)</p>
-              <CopyButton text={clip.hook} />
+          {/* Hook — only shown if a hook was detected */}
+          {clip.hook ? (
+            <div className="rounded-xl p-3" style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.15)' }}>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#fbbf24' }}>🪝 Hook — First 3 seconds (big text overlay)</p>
+                <CopyButton text={clip.hook} />
+              </div>
+              <p className="text-sm font-bold" style={{ color: '#f0f0ff' }}>"{clip.hook}"</p>
+              <p className="text-[10px] mt-1" style={{ color: '#6b7280' }}>Position: <strong style={{color:'#d1d5db'}}>{clip.textPlacement.toUpperCase()}</strong> of screen · Bold white · Black outline</p>
             </div>
-            <p className="text-sm font-bold" style={{ color: '#f0f0ff' }}>"{clip.hook}"</p>
-            <p className="text-[10px] mt-1" style={{ color: '#6b7280' }}>Position: <strong style={{color:'#d1d5db'}}>{clip.textPlacement.toUpperCase()}</strong> of screen · Bold white · Black outline</p>
-          </div>
+          ) : (
+            <div className="rounded-xl p-3" style={{ background: 'rgba(75,85,99,0.08)', border: '1px solid #1a1a32' }}>
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: '#4b5563' }}>🪝 Hook text overlay</p>
+              <p className="text-xs italic" style={{ color: '#374151' }}>No hook needed — the clip speaks for itself. Let the visuals do the work.</p>
+            </div>
+          )}
 
           {/* Caption */}
           <div className="rounded-xl p-3" style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.2)' }}>

@@ -1,5 +1,6 @@
-// YouTube clip analyzer — heuristic scoring + TikTok instructions generator
-// No AI API key needed: pure signal-based scoring on transcript text.
+// YouTube clip analyzer — smart heuristic scoring + contextual TikTok strategy
+// Reads the actual transcript to generate hooks, captions and hashtags that
+// reflect the real content of each clip, not generic templates.
 
 export interface TranscriptEntry {
   text: string;
@@ -14,7 +15,7 @@ export interface ClipSegment {
   duration: number;    // seconds
   transcript: string;
   score: number;
-  hook: string;
+  hook: string | null; // null = no text overlay needed
   caption: string;
   hashtags: string;
   textPlacement: 'top' | 'center' | 'bottom';
@@ -31,83 +32,251 @@ export interface YTInfo {
   clips: ClipSegment[];
 }
 
-// ── Scoring signals ────────────────────────────────────────────────────────
+// ── Language detection ─────────────────────────────────────────────────────
+
+const FR_MARKERS = /\b(je|tu|il|elle|nous|vous|ils|elles|ma|mon|mes|les|des|que|qui|avec|pour|dans|sur|une|est|pas|mais|ou|et|en|au|aux|donc|genre|nan|ouais|voila|c'est|j'ai|t'as|y'a|quoi|bien|faire|dire|voir|aller|aussi|comme|très|tout|plus|même|toujours|jamais|souvent)\b/i;
+
+function detectLang(text: string): 'fr' | 'en' {
+  const matches = (text.match(FR_MARKERS) || []).length;
+  const words = text.split(/\s+/).length;
+  return matches / words > 0.08 ? 'fr' : 'en';
+}
+
+// ── Per-sentence hook scoring ──────────────────────────────────────────────
+
+function sentenceHookScore(s: string): number {
+  let score = 0;
+  const lower = s.toLowerCase().trim();
+
+  // Questions = curiosity gap, great hooks
+  if (/\?$/.test(s)) score += 12;
+  if (/^(why|how|what|when|where|who|did|do|is|are|was|were|would|could|should)/i.test(s)) score += 6;
+  if (/^(pourquoi|comment|combien|c'est quoi|qu'est-ce|est-ce que|t'as|tu as|tu veux)/i.test(lower)) score += 6;
+
+  // Short punchy = better hook (sweet spot 10-50 chars)
+  const len = s.trim().length;
+  if (len >= 8 && len <= 30) score += 8;
+  else if (len <= 50) score += 4;
+  else if (len > 100) score -= 4;
+
+  // Numbers / stats are always viral
+  if (/\d+/.test(s)) score += 5;
+  if (/(€|\$|k€|euros?|dollars?|millions?|milliards?|thousand|billion)/i.test(s)) score += 6;
+
+  // Contrast / reveal words
+  if (/(mais|but|sauf|except|pourtant|however|actually|en fait|finalement|au final|wait)/i.test(lower)) score += 5;
+
+  // Emotion / reaction words
+  if (/(incroyable|fou|dingue|choquant|crazy|insane|incredible|shocked|amazing|sérieusement|honnêtement|franchement)/i.test(lower)) score += 4;
+
+  // Personal & story
+  if (/\b(j'ai|i )\b.*(jamais|never|first time|la première fois|toujours|always)/i.test(lower)) score += 5;
+
+  // Avoid boring opener sentences (filler words)
+  if (/^(so|donc|et|and|um|euh|alors|ok|bah|ben)\b/i.test(lower)) score -= 3;
+
+  return score;
+}
+
+// ── Extract best hook quote from transcript ────────────────────────────────
+
+function extractBestHook(transcript: string): string | null {
+  if (!transcript.trim()) return null;
+
+  const sentences = transcript
+    .replace(/\[.*?\]/g, '') // remove [Music], [Applause] etc.
+    .split(/(?<=[.!?])\s+|(?<=\?)\s*/)
+    .map(s => s.trim())
+    .filter(s => s.length >= 8 && s.length <= 120);
+
+  if (!sentences.length) return null;
+
+  const scored = sentences
+    .map(s => ({ text: s, score: sentenceHookScore(s) }))
+    .sort((a, b) => b.score - a.score);
+
+  const best = scored[0];
+  if (!best || best.score < 3) return null; // not worth showing a hook
+
+  // Clean up: remove leading filler
+  let hook = best.text.replace(/^(so,?|donc,?|and,?|et,?|um,?|euh,?|bah,?)\s+/i, '');
+  // Capitalize first letter
+  hook = hook.charAt(0).toUpperCase() + hook.slice(1);
+  // Remove trailing period (looks odd as overlay text), keep ? and !
+  hook = hook.replace(/\.$/, '');
+
+  return hook.length >= 6 ? hook : null;
+}
+
+// ── Topic detection ────────────────────────────────────────────────────────
+
+interface TopicMatch {
+  tags: string[];
+  frTags: string[];
+  enTags: string[];
+}
+
+const TOPICS: Array<{ pattern: RegExp; match: TopicMatch }> = [
+  {
+    pattern: /voiture|car|supercar|ferrari|lamborghini|porsche|bmw|mercedes|audi|moto|driving|drive|vitesse|speed|racing|garage|auto/i,
+    match: { tags: ['#car', '#supercar', '#automotive'], frTags: ['#voiture', '#auto', '#carfrancais'], enTags: ['#carculture', '#carporn', '#driving'] },
+  },
+  {
+    pattern: /argent|money|rich|riche|business|entrepreneur|investir|invest|startup|trading|revenu|income|passive|earn|gagner|million|milliardaire|billionaire|salaire|salary/i,
+    match: { tags: ['#money', '#business', '#success'], frTags: ['#argent', '#entrepreneur', '#investissement'], enTags: ['#financetok', '#moneytips', '#investing'] },
+  },
+  {
+    pattern: /fitness|gym|sport|muscle|entraînement|workout|training|nutrition|regime|diet|poids|weight|minceur|running|course/i,
+    match: { tags: ['#fitness', '#gym', '#sport'], frTags: ['#fitnessfr', '#muscu', '#sporttiktok'], enTags: ['#gymtok', '#workout', '#fitfam'] },
+  },
+  {
+    pattern: /amour|love|relation|couple|mec|meuf|boyfriend|girlfriend|dating|rencontre|rupture|breakup|mariage|wedding|kiss|câlin/i,
+    match: { tags: ['#love', '#relationship'], frTags: ['#amour', '#couple', '#relatable'], enTags: ['#dating', '#relationship', '#couplegoals'] },
+  },
+  {
+    pattern: /cuisine|food|recipe|recette|manger|restaurant|chef|plat|meal|cook|cooking|gastronomie|gourmet/i,
+    match: { tags: ['#food', '#foodie'], frTags: ['#cuisine', '#recette', '#foodtiktok'], enTags: ['#foodtok', '#recipe', '#cooking'] },
+  },
+  {
+    pattern: /voyage|travel|trip|vacances|holiday|pays|country|city|ville|explore|aventure|adventure|abroad|etranger/i,
+    match: { tags: ['#travel', '#explore'], frTags: ['#voyage', '#traveltiktok', '#aventure'], enTags: ['#wanderlust', '#traveltok', '#adventure'] },
+  },
+  {
+    pattern: /tech|technologie|ai|intelligence artificielle|application|app|software|digital|code|programme|ordinateur|phone|smartphone/i,
+    match: { tags: ['#tech', '#AI'], frTags: ['#techtok', '#technologie'], enTags: ['#technology', '#techreview'] },
+  },
+  {
+    pattern: /mode|fashion|style|outfit|vêtement|clothes|shopping|tendance|trend|luxe|luxury|marque|brand/i,
+    match: { tags: ['#fashion', '#style'], frTags: ['#mode', '#tenue', '#shopping'], enTags: ['#ootd', '#fashiontok', '#luxury'] },
+  },
+  {
+    pattern: /psycho|mental|anxiety|stress|dépression|depression|bien-être|wellbeing|santé|health|thérapie|therapy|motivat/i,
+    match: { tags: ['#mentalhealth', '#motivation'], frTags: ['#bienetre', '#psychologie'], enTags: ['#mindset', '#mentalhealthtok'] },
+  },
+  {
+    pattern: /music|musique|chanson|song|rap|hip.?hop|rnb|pop|artiste|artist|concert|album|clip/i,
+    match: { tags: ['#music', '#musicvideo'], frTags: ['#musique', '#artiste'], enTags: ['#musictok', '#newmusic'] },
+  },
+];
+
+function detectTopics(text: string, title: string): TopicMatch[] {
+  const full = text + ' ' + title;
+  return TOPICS.filter(t => t.pattern.test(full)).map(t => t.match);
+}
+
+// ── Smart hashtags ─────────────────────────────────────────────────────────
+
+function buildHashtags(text: string, title: string, lang: 'fr' | 'en'): string {
+  const topics = detectTopics(text, title);
+  const tags = new Set<string>();
+
+  // Universal base
+  tags.add('#fyp');
+  tags.add('#foryou');
+  tags.add('#viral');
+  if (lang === 'fr') { tags.add('#france'); tags.add('#pourtoi'); }
+
+  for (const topic of topics.slice(0, 2)) {
+    topic.tags.forEach(t => tags.add(t));
+    if (lang === 'fr') topic.frTags.slice(0, 2).forEach(t => tags.add(t));
+    else topic.enTags.slice(0, 2).forEach(t => tags.add(t));
+  }
+
+  // Fallback niche tags if no topic detected
+  if (topics.length === 0) {
+    if (lang === 'fr') { tags.add('#france'); tags.add('#tiktokfrance'); tags.add('#tendance'); }
+    else { tags.add('#trending'); tags.add('#video'); tags.add('#content'); }
+  }
+
+  return Array.from(tags).slice(0, 8).join(' ');
+}
+
+// ── Call to action — varied & natural ─────────────────────────────────────
+
+const CTA_FR = [
+  'Abonne-toi pour la suite 🔔',
+  'Sauvegarde si ça te parle 💾',
+  'C\'est quoi ton avis ? 👇',
+  'Tu kiffes ou pas ? Commente 👇',
+  'Suuis pour plus de contenu comme ça ✅',
+];
+const CTA_EN = [
+  'Follow for more 🔥',
+  'Save this for later 💾',
+  'Drop your thoughts below 👇',
+  'What do you think? Comment 👇',
+  'Turn on notifs so you don\'t miss it 🔔',
+];
+
+function pickCTA(index: number, lang: 'fr' | 'en'): string {
+  const pool = lang === 'fr' ? CTA_FR : CTA_EN;
+  return pool[index % pool.length];
+}
+
+// ── Caption builder ────────────────────────────────────────────────────────
+
+function buildCaption(hook: string | null, transcript: string, hashtags: string, lang: 'fr' | 'en'): string {
+  // Use the actual transcript for the caption body (clean up a bit)
+  const body = transcript
+    .replace(/\[.*?\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 150);
+
+  const ellipsis = transcript.length > 150 ? '...' : '';
+  const opener = hook ? `${hook}\n\n` : '';
+  const cta = lang === 'fr' ? '👇 voir la suite' : '👇 watch till the end';
+  return `${opener}${body}${ellipsis}\n\n${cta}\n\n${hashtags}`;
+}
+
+// ── Checklist (language-aware) ─────────────────────────────────────────────
+
+function buildChecklist(placement: 'top' | 'center' | 'bottom', lang: 'fr' | 'en'): string[] {
+  if (lang === 'fr') {
+    return [
+      `Ajoute le texte hook en ${placement === 'top' ? 'haut' : placement === 'center' ? 'milieu' : 'bas'} d'écran (gras, blanc, contour noir)`,
+      'Active les sous-titres auto: Modifier → Sous-titres → Générer automatiquement',
+      'Coupe 0.5s de silence au début/fin si besoin',
+      'Visibilité: Tout le monde (pas Amis)',
+      'Poste entre 19h–22h heure locale pour max reach',
+      'Réponds au 1er commentaire dans les 30 min 🚀',
+    ];
+  }
+  return [
+    `Add hook text overlay at ${placement} of screen (bold white, black outline)`,
+    'Enable auto-captions: Edit → Captions → Auto-generate',
+    'Trim 0.5s of silence from start/end if needed',
+    'Set visibility to Everyone (not Friends)',
+    'Post between 7–10 PM local time for max reach',
+    'Reply to first comment within 30 min 🚀',
+  ];
+}
+
+// ── Engagement scoring ─────────────────────────────────────────────────────
 
 const HOOK_KEYWORDS = [
   'never', 'always', 'secret', 'truth', 'honest', 'actually', 'wait',
-  'wrong', 'mistake', 'crazy', 'insane', 'incredible', 'shocking', 'wild',
-  'nobody', 'everyone', 'most people', 'biggest', 'worst', 'best', 'only',
-  'real reason', 'changed', 'broke', 'stopped', 'quit', 'realized',
-  'confess', 'admit', 'discovered', 'earned', 'million', 'billion',
-  'first time', 'last time', 'suddenly', 'thought', 'imagine',
+  'wrong', 'mistake', 'crazy', 'insane', 'incredible', 'shocking',
+  'nobody', 'everyone', 'biggest', 'worst', 'best', 'only', 'changed',
+  'broke', 'stopped', 'quit', 'realized', 'discovered', 'earned', 'million',
+  'jamais', 'toujours', 'secret', 'vrai', 'honnêtement', 'fou', 'dingue',
+  'incroyable', 'choquant', 'personne', 'tout le monde', 'meilleur', 'pire',
+  'changé', 'arrêté', 'réalisé', 'découvert', 'gagné',
 ];
-const QUESTION_RE = /\b(why|how|what|when|where|who|would|could|should|did|do|does|is|are|was|were)\b[^.!?]*\?/i;
-const NUMBER_RE   = /\b\d+(\s*%|k|m\b|billion|million|thousand|hundred|percent)/i;
-const EMOTION_WDS = ['love','hate','fear','angry','happy','sad','excited','scared','proud','regret','hurt','lucky','shocked','surprised'];
 
 function scoreText(text: string): number {
   let score = 0;
   const lower = text.toLowerCase();
   HOOK_KEYWORDS.forEach(kw => { if (lower.includes(kw)) score += 2; });
-  if (QUESTION_RE.test(text)) score += 5;
-  if (NUMBER_RE.test(text))   score += 3;
+  if (/\?/.test(text)) score += 5;
+  if (/\d+/.test(text)) score += 3;
   const exclamations = (text.match(/!/g) || []).length;
   score += Math.min(exclamations * 2, 6);
-  EMOTION_WDS.forEach(e => { if (lower.includes(e)) score += 1; });
-  // Short punchy sentences = watchable
   const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 5);
   const avgLen = sentences.length ? sentences.reduce((s, t) => s + t.length, 0) / sentences.length : 80;
   if (avgLen < 50) score += 3;
   else if (avgLen < 80) score += 1;
   return score;
-}
-
-// ── Hook templates ─────────────────────────────────────────────────────────
-
-function genHook(text: string): string {
-  const l = text.toLowerCase();
-  if (l.includes('secret') || l.includes('nobody'))           return 'Nobody talks about this...';
-  if (l.includes('mistake') || l.includes('wrong'))           return "I was completely wrong about this";
-  if (QUESTION_RE.test(text))                                 return 'Wait until you hear the answer...';
-  if (NUMBER_RE.test(text))                                   return 'These numbers will surprise you 👀';
-  if (l.includes('first time') || l.includes('never'))        return 'This changed everything for me';
-  if (l.includes('million') || l.includes('billion'))         return 'This is how it actually works 💰';
-  if (l.includes('quit') || l.includes('stopped'))            return 'I finally did it...';
-  if (l.includes('realized') || l.includes('discovered'))     return 'When I realized this, everything clicked';
-  if (l.includes('truth') || l.includes('honest'))            return "The truth nobody wants to admit";
-  return 'You need to hear this 👇';
-}
-
-function genCaption(text: string, hook: string, hashtags: string): string {
-  const body = text.length > 100 ? text.slice(0, 100).replace(/\s\S+$/, '') + '...' : text;
-  return `${hook}\n\n${body}\n\n${hashtags}`;
-}
-
-function genHashtags(text: string, title: string): string {
-  const base = '#viral #fyp #foryou #trending';
-  const l = (text + ' ' + title).toLowerCase();
-  const extras: string[] = [];
-  if (l.match(/money|rich|earn|million|income|wealth/))      extras.push('#money #financetok #moneytips');
-  if (l.match(/business|entrepreneur|startup|company/))      extras.push('#business #entrepreneur');
-  if (l.match(/fitness|workout|gym|body|health/))            extras.push('#fitness #gym #healthtok');
-  if (l.match(/food|recipe|cook|eat|restaurant/))            extras.push('#food #recipe #foodtok');
-  if (l.match(/motivat|success|mindset|discipline/))         extras.push('#motivation #mindset #success');
-  if (l.match(/tech|ai|software|app|digital/))               extras.push('#tech #AI #technology');
-  if (l.match(/fashion|style|outfit|clothing/))              extras.push('#fashion #style #ootd');
-  if (l.match(/relationship|love|dating|couple/))            extras.push('#relationship #love');
-  if (l.match(/travel|trip|country|city|world/))             extras.push('#travel #wanderlust');
-  return `${base} ${extras.slice(0, 2).join(' ')}`.trim();
-}
-
-function genChecklist(placement: string): string[] {
-  return [
-    `Add hook text overlay at ${placement} of screen (bold white, black outline)`,
-    'Enable TikTok auto-captions: Edit → Captions → Auto-generate',
-    'Trim 0.5s of silence from start/end if needed',
-    'Set visibility to Everyone (not Friends)',
-    'Post between 6–10 PM your local time for max reach',
-    'Reply to the first comment within 30 min to boost algorithm',
-  ];
 }
 
 // ── Main analyzer ──────────────────────────────────────────────────────────
@@ -121,11 +290,8 @@ export function analyzeTranscriptForClips(
   videoDuration: number,
   videoTitle: string,
 ): ClipSegment[] {
-  if (!transcript.length) {
-    return buildEvenClips(targetCount, videoDuration, videoTitle);
-  }
+  if (!transcript.length) return buildEvenClips(targetCount, videoDuration, videoTitle);
 
-  // Build candidate windows with ~30% overlap
   const windows: Array<{ start: number; end: number; text: string; score: number }> = [];
   let i = 0;
 
@@ -142,7 +308,6 @@ export function analyzeTranscriptForClips(
       const elapsed = (endMs - startMs) / 1000;
       j++;
       if (elapsed >= MIN_CLIP_SEC) {
-        // Prefer to cut at sentence boundary
         const atBoundary = /[.!?]$/.test(entry.text.trim());
         if (atBoundary || elapsed >= MAX_CLIP_SEC) break;
       }
@@ -153,14 +318,12 @@ export function analyzeTranscriptForClips(
       windows.push({ start: startMs / 1000, end: endMs / 1000, text: text.trim(), score: scoreText(text) });
     }
 
-    // Advance by ~60% of window for overlap
     const step = Math.max(1, Math.floor((j - i) * 0.6));
     i += step;
   }
 
   if (!windows.length) return buildEvenClips(targetCount, videoDuration, videoTitle);
 
-  // Take top-scoring windows, de-duplicate overlapping ones
   const sorted = [...windows].sort((a, b) => b.score - a.score);
   const selected: typeof windows = [];
 
@@ -170,7 +333,6 @@ export function analyzeTranscriptForClips(
     if (!overlaps) selected.push(w);
   }
 
-  // Pad with evenly-spaced if not enough
   if (selected.length < targetCount) {
     const step = videoDuration / (targetCount + 1);
     for (let k = 1; selected.length < targetCount; k++) {
@@ -193,36 +355,55 @@ function buildClipSegment(
   total: number,
   title: string,
 ): ClipSegment {
+  const lang = detectLang(w.text + ' ' + title);
   const placements: Array<'top' | 'center' | 'bottom'> = ['top', 'center', 'bottom'];
   const placement = placements[idx % 3];
-  const hook     = genHook(w.text);
-  const tags     = genHashtags(w.text, title);
-  const caption  = genCaption(w.text, hook, tags);
-  const cta      = idx === total - 1 ? 'Follow for more 🔥' : idx % 2 === 0 ? 'Save this 💾' : 'Comment below 👇';
+
+  // Smart hook: extracted from actual transcript
+  const hook = extractBestHook(w.text);
+  const hashtags = buildHashtags(w.text, title, lang);
+  const caption = buildCaption(hook, w.text, hashtags, lang);
+  const cta = pickCTA(idx, lang);
 
   return {
     index: idx,
     start: Math.max(0, parseFloat(w.start.toFixed(2))),
     end: parseFloat(w.end.toFixed(2)),
     duration: parseFloat((w.end - w.start).toFixed(2)),
-    transcript: w.text,
+    transcript: w.text.trim(),
     score: w.score,
     hook,
     caption,
-    hashtags: tags,
+    hashtags,
     textPlacement: placement,
     callToAction: cta,
-    checklist: genChecklist(placement),
+    checklist: buildChecklist(placement, lang),
   };
 }
 
 function buildEvenClips(count: number, duration: number, title: string): ClipSegment[] {
   const clipDur = Math.min(30, duration / count);
-  const step    = (duration - clipDur) / Math.max(1, count - 1);
+  const step = (duration - clipDur) / Math.max(1, count - 1);
+  const lang = detectLang(title);
   return Array.from({ length: count }, (_, i) => {
     const start = parseFloat((i * step).toFixed(2));
-    const end   = parseFloat((start + clipDur).toFixed(2));
-    const w     = { start, end, text: `${title} — clip ${i + 1}`, score: 0 };
-    return buildClipSegment(w, i, count, title);
+    const end = parseFloat((start + clipDur).toFixed(2));
+    const hashtags = buildHashtags('', title, lang);
+    const hook = extractBestHook(title);
+    const caption = buildCaption(hook, title, hashtags, lang);
+    return {
+      index: i,
+      start,
+      end,
+      duration: parseFloat(clipDur.toFixed(2)),
+      transcript: title,
+      score: 0,
+      hook,
+      caption,
+      hashtags,
+      textPlacement: (['top', 'center', 'bottom'] as const)[i % 3],
+      callToAction: pickCTA(i, lang),
+      checklist: buildChecklist((['top', 'center', 'bottom'] as const)[i % 3], lang),
+    };
   });
 }
