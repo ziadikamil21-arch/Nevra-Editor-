@@ -807,6 +807,54 @@ export default function Home() {
 
   const switchMode = (mode: FileMode) => { setActiveMode(mode); setError(null); };
 
+  // ── YouTube: download helper (browser-side, avoids server IP blocks) ───
+  const ytStreamWithProgress = async (res: Response): Promise<Uint8Array[]> => {
+    const reader = res.body!.getReader();
+    const total = parseInt(res.headers.get('content-length') ?? '0');
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      if (total > 0) setYtDownloadPct(Math.round((received / total) * 100));
+    }
+    setYtDownloadPct(100);
+    return chunks;
+  };
+
+  const getYtVideoBlob = async (url: string): Promise<Blob> => {
+    // ── Attempt 1: cobalt.tools directly from browser (CORS-enabled, residential IPs) ──
+    try {
+      const cobaltRes = await fetch('https://api.cobalt.tools/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ url, videoQuality: '480', downloadMode: 'auto' }),
+      });
+      if (cobaltRes.ok) {
+        const data = await cobaltRes.json();
+        const videoUrl = data.url as string | undefined;
+        if (videoUrl && data.status !== 'error') {
+          const videoRes = await fetch(videoUrl);
+          if (videoRes.ok && videoRes.body) {
+            const chunks = await ytStreamWithProgress(videoRes);
+            return new Blob(chunks as BlobPart[], { type: 'video/mp4' });
+          }
+        }
+      }
+    } catch { /* fall through */ }
+
+    // ── Attempt 2: server proxy (fallback) ────────────────────────────────
+    const proxyRes = await fetch(`/api/yt-proxy?v=${encodeURIComponent(url)}`);
+    if (!proxyRes.ok) {
+      const errData = await proxyRes.json().catch(() => ({})) as { error?: string };
+      throw new Error(errData.error ?? 'Video download failed — try again');
+    }
+    const chunks = await ytStreamWithProgress(proxyRes);
+    return new Blob(chunks as BlobPart[], { type: 'video/mp4' });
+  };
+
   // ── YouTube: ONE click → analyze + download + cut ─────────────────────
   const handleYtCreate = async () => {
     if (!ytUrl.trim() || !ffmpegReady) return;
@@ -820,37 +868,19 @@ export default function Home() {
     setYtDownloadPct(0);
 
     try {
-      // ── Step 1 & 2 in PARALLEL: analyze transcript + download video ──────
-      const [infoRes, videoRes] = await Promise.all([
-        fetch(`/api/yt-info?url=${encodeURIComponent(ytUrl.trim())}&count=${ytClipCount}`),
-        fetch(`/api/yt-proxy?v=${encodeURIComponent(ytUrl.trim())}`),
-      ]);
-
-      // Parse analysis
+      // Step 1: analyze transcript (parallel with download start)
+      const infoRes = await fetch(`/api/yt-info?url=${encodeURIComponent(ytUrl.trim())}&count=${ytClipCount}`);
       const infoData = await infoRes.json();
       if (!infoRes.ok) throw new Error(infoData.error ?? 'Analysis failed');
       setYtInfo(infoData);
       setYtAnalyzing(false);
       setYtDownloading(true);
 
-      // Stream video download with progress
-      if (!videoRes.ok) throw new Error('Video download failed — try again');
-      const reader = videoRes.body!.getReader();
-      const total = parseInt(videoRes.headers.get('content-length') ?? '0');
-      const chunks: Uint8Array[] = [];
-      let received = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        received += value.length;
-        if (total > 0) setYtDownloadPct(Math.round((received / total) * 100));
-      }
-      setYtDownloadPct(100);
-
-      // ── Step 3: Load into FFmpeg + cut each clip ────────────────────────
-      const videoBlob = new Blob(chunks as BlobPart[], { type: 'video/mp4' });
+      // Step 2: download video (browser-side → no server IP block)
+      const videoBlob = await getYtVideoBlob(ytUrl.trim());
       setYtVideoBlob(videoBlob);
+
+      // Step 3: load into FFmpeg + cut each clip
       const ff = ffVideoRef.current!;
       const { fetchFile } = await import('@ffmpeg/util');
       const inputName = 'yt_input.mp4';
