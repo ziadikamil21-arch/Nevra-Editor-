@@ -960,6 +960,18 @@ export default function Home() {
     ytInfo.clips.forEach(c => { if (ytClipBlobs[c.index]) ytDownloadClip(c.index); });
   };
 
+  const resetYt = () => {
+    setYtInfo(null);
+    setYtUrl('');
+    setYtClipBlobs({});
+    setYtVideoBlob(null);
+    setYtClipProcessing(new Set());
+    setYtError(null);
+    setYtDownloadPct(0);
+    setYtAnalyzing(false);
+    setYtDownloading(false);
+  };
+
   // ── Create variants ────────────────────────────────────────────────────────
   const handleCreate = async (mirrorChoice?: boolean, removeAudio = false) => {
     const isImage = activeMode === 'photo';
@@ -1208,6 +1220,12 @@ export default function Home() {
                     ⬇ All
                   </button>
                 )}
+                {/* Discreet reset button */}
+                <button onClick={resetYt} title="Remove & start over"
+                  className="w-6 h-6 rounded-lg flex items-center justify-center text-xs flex-shrink-0 transition-all hover:scale-110"
+                  style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
+                  ✕
+                </button>
               </div>
             )}
 
