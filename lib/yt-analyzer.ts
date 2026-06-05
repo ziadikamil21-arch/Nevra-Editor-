@@ -1,21 +1,19 @@
-// YouTube clip analyzer — smart heuristic scoring + contextual TikTok strategy
-// Reads the actual transcript to generate hooks, captions and hashtags that
-// reflect the real content of each clip, not generic templates.
+// YouTube clip analyzer — sliding-window hook extraction + contextual TikTok strategy
 
 export interface TranscriptEntry {
   text: string;
   duration: number;
-  offset: number; // ms
+  offset: number;
 }
 
 export interface ClipSegment {
   index: number;
-  start: number;       // seconds
-  end: number;         // seconds
-  duration: number;    // seconds
+  start: number;
+  end: number;
+  duration: number;
   transcript: string;
   score: number;
-  hook: string | null; // null = no text overlay needed
+  hook: string | null;
   caption: string;
   hashtags: string;
   textPlacement: 'top' | 'center' | 'bottom';
@@ -34,244 +32,275 @@ export interface YTInfo {
 
 // ── Language detection ─────────────────────────────────────────────────────
 
-const FR_MARKERS = /\b(je|tu|il|elle|nous|vous|ils|elles|ma|mon|mes|les|des|que|qui|avec|pour|dans|sur|une|est|pas|mais|ou|et|en|au|aux|donc|genre|nan|ouais|voila|c'est|j'ai|t'as|y'a|quoi|bien|faire|dire|voir|aller|aussi|comme|très|tout|plus|même|toujours|jamais|souvent)\b/i;
+const FR_RE = /\b(je|tu|il|elle|nous|vous|ils|elles|ma|mon|mes|les|des|que|qui|avec|pour|dans|sur|une|est|pas|mais|ou|et|en|au|aux|donc|genre|nan|ouais|c'est|j'ai|t'as|y'a|quoi|faire|aussi|comme|très|tout|plus|même|toujours|jamais|souvent|alors|après|avant|ça|là|bah|mec|bro|kiff)\b/gi;
 
 function detectLang(text: string): 'fr' | 'en' {
-  const matches = (text.match(FR_MARKERS) || []).length;
-  const words = text.split(/\s+/).length;
-  return matches / words > 0.08 ? 'fr' : 'en';
+  const words = text.split(/\s+/).filter(Boolean).length || 1;
+  const hits = (text.match(FR_RE) || []).length;
+  return hits / words > 0.07 ? 'fr' : 'en';
 }
 
-// ── Per-sentence hook scoring ──────────────────────────────────────────────
+// ── Per-word-window hook scoring ───────────────────────────────────────────
+// YouTube auto-transcripts have NO punctuation — split by words, not sentences.
 
-function sentenceHookScore(s: string): number {
+function windowScore(words: string[]): number {
+  const s = words.join(' ');
+  const lower = s.toLowerCase();
   let score = 0;
-  const lower = s.toLowerCase().trim();
 
-  // Questions = curiosity gap, great hooks
-  if (/\?$/.test(s)) score += 12;
-  if (/^(why|how|what|when|where|who|did|do|is|are|was|were|would|could|should)/i.test(s)) score += 6;
-  if (/^(pourquoi|comment|combien|c'est quoi|qu'est-ce|est-ce que|t'as|tu as|tu veux)/i.test(lower)) score += 6;
+  // Sweet spot length
+  const len = s.length;
+  if (len >= 12 && len <= 40) score += 8;
+  else if (len <= 60) score += 4;
+  else score -= 2;
 
-  // Short punchy = better hook (sweet spot 10-50 chars)
-  const len = s.trim().length;
-  if (len >= 8 && len <= 30) score += 8;
-  else if (len <= 50) score += 4;
-  else if (len > 100) score -= 4;
+  // Questions are the #1 hook format
+  if (/\?$/.test(s.trim())) score += 12;
+  if (/^(pourquoi|comment|combien|c'est quoi|est-ce|tu sais|t'as|tu veux|vous savez|why|how|what|when|who|did you|do you|have you)/i.test(lower)) score += 8;
 
-  // Numbers / stats are always viral
-  if (/\d+/.test(s)) score += 5;
-  if (/(€|\$|k€|euros?|dollars?|millions?|milliards?|thousand|billion)/i.test(s)) score += 6;
+  // Numbers / money = viral
+  if (/\d+/.test(s)) score += 6;
+  if (/(€|\$|k€|euros?|dollars?|millions?|milliards?)/i.test(s)) score += 8;
 
-  // Contrast / reveal words
-  if (/(mais|but|sauf|except|pourtant|however|actually|en fait|finalement|au final|wait)/i.test(lower)) score += 5;
+  // Contrast / reveal
+  if (/\b(mais|sauf|pourtant|except|but|however|actually|en fait|finalement|wait|au final)\b/i.test(lower)) score += 5;
 
-  // Emotion / reaction words
-  if (/(incroyable|fou|dingue|choquant|crazy|insane|incredible|shocked|amazing|sérieusement|honnêtement|franchement)/i.test(lower)) score += 4;
+  // Shock / emotion
+  if (/\b(incroyable|fou|dingue|choquant|crazy|insane|incredible|jamais vu|unbelievable|no way|vraiment|sérieusement|honnêtement)\b/i.test(lower)) score += 5;
 
-  // Personal & story
-  if (/\b(j'ai|i )\b.*(jamais|never|first time|la première fois|toujours|always)/i.test(lower)) score += 5;
+  // Personal / story
+  if (/\b(j'ai|i (was|did|made|got|lost|found|saw)|on m'a|ils m'ont|they told|he said|she said)\b/i.test(lower)) score += 4;
 
-  // Avoid boring opener sentences (filler words)
-  if (/^(so|donc|et|and|um|euh|alors|ok|bah|ben)\b/i.test(lower)) score -= 3;
+  // Don't start with filler
+  if (/^(donc|et|and|so|um|euh|bah|ben|ok|well|like)\b/i.test(lower)) score -= 4;
+
+  // Avoid just being a list of common words
+  const uniqueWords = new Set(words.map(w => w.toLowerCase())).size;
+  if (uniqueWords < words.length * 0.6) score -= 3;
 
   return score;
 }
 
-// ── Extract best hook quote from transcript ────────────────────────────────
-
 function extractBestHook(transcript: string): string | null {
-  if (!transcript.trim()) return null;
+  const clean = transcript
+    .replace(/\[.*?\]/g, '')   // remove [Music], [Applause]
+    .replace(/[^\w\s'àâäéèêëîïôùûüœçÀÂÄÉÈÊËÎÏÔÙÛÜŒÇ€$.,!?]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  const sentences = transcript
-    .replace(/\[.*?\]/g, '') // remove [Music], [Applause] etc.
-    .split(/(?<=[.!?])\s+|(?<=\?)\s*/)
-    .map(s => s.trim())
-    .filter(s => s.length >= 8 && s.length <= 120);
+  const words = clean.split(/\s+/).filter(w => w.length > 0);
+  if (words.length < 5) return null;
 
-  if (!sentences.length) return null;
+  let bestScore = -Infinity;
+  let bestWindow = '';
 
-  const scored = sentences
-    .map(s => ({ text: s, score: sentenceHookScore(s) }))
-    .sort((a, b) => b.score - a.score);
+  // Slide windows of 4–12 words
+  for (let size = 4; size <= 12; size++) {
+    for (let i = 0; i <= words.length - size; i++) {
+      const window = words.slice(i, i + size);
+      const score = windowScore(window);
+      if (score > bestScore) {
+        bestScore = score;
+        bestWindow = window.join(' ');
+      }
+    }
+  }
 
-  const best = scored[0];
-  if (!best || best.score < 3) return null; // not worth showing a hook
+  if (bestScore < 5) return null;
 
-  // Clean up: remove leading filler
-  let hook = best.text.replace(/^(so,?|donc,?|and,?|et,?|um,?|euh,?|bah,?)\s+/i, '');
-  // Capitalize first letter
+  // Clean and capitalize
+  let hook = bestWindow.trim();
   hook = hook.charAt(0).toUpperCase() + hook.slice(1);
-  // Remove trailing period (looks odd as overlay text), keep ? and !
-  hook = hook.replace(/\.$/, '');
+  hook = hook.replace(/[.,]+$/, '');
 
-  return hook.length >= 6 ? hook : null;
+  return hook.length >= 8 ? hook : null;
 }
 
 // ── Topic detection ────────────────────────────────────────────────────────
 
-interface TopicMatch {
-  tags: string[];
-  frTags: string[];
-  enTags: string[];
+type TopicKey = 'car' | 'money' | 'fitness' | 'food' | 'travel' | 'tech' | 'fashion' | 'relationship' | 'music' | 'general';
+
+function detectTopicKey(text: string): TopicKey {
+  const lower = text.toLowerCase();
+  if (/voiture|supercar|ferrari|lamborghini|porsche|bmw|mercedes|audi|moto|drive|vitesse|racing|garage|car\b/.test(lower)) return 'car';
+  if (/argent|money|rich|riche|business|invest|trading|revenu|income|earn|gagner|million|salaire/.test(lower)) return 'money';
+  if (/fitness|gym|sport|muscle|workout|training|nutrition|regime|poids|running/.test(lower)) return 'fitness';
+  if (/cuisine|food|recipe|recette|manger|restaurant|chef|plat|cook/.test(lower)) return 'food';
+  if (/voyage|travel|trip|vacances|holiday|pays|country|city|explore|aventure/.test(lower)) return 'travel';
+  if (/tech|ia|ai|intelligence|app|software|digital|code|phone|smartphone/.test(lower)) return 'tech';
+  if (/mode|fashion|style|outfit|vêtement|clothes|shopping|tendance|marque/.test(lower)) return 'fashion';
+  if (/amour|love|couple|relation|mec|meuf|boyfriend|girlfriend|dating|rupture/.test(lower)) return 'relationship';
+  if (/music|musique|chanson|song|rap|hip.?hop|rnb|artiste|concert|album/.test(lower)) return 'music';
+  return 'general';
 }
 
-const TOPICS: Array<{ pattern: RegExp; match: TopicMatch }> = [
-  {
-    pattern: /voiture|car|supercar|ferrari|lamborghini|porsche|bmw|mercedes|audi|moto|driving|drive|vitesse|speed|racing|garage|auto/i,
-    match: { tags: ['#car', '#supercar', '#automotive'], frTags: ['#voiture', '#auto', '#carfrancais'], enTags: ['#carculture', '#carporn', '#driving'] },
-  },
-  {
-    pattern: /argent|money|rich|riche|business|entrepreneur|investir|invest|startup|trading|revenu|income|passive|earn|gagner|million|milliardaire|billionaire|salaire|salary/i,
-    match: { tags: ['#money', '#business', '#success'], frTags: ['#argent', '#entrepreneur', '#investissement'], enTags: ['#financetok', '#moneytips', '#investing'] },
-  },
-  {
-    pattern: /fitness|gym|sport|muscle|entraînement|workout|training|nutrition|regime|diet|poids|weight|minceur|running|course/i,
-    match: { tags: ['#fitness', '#gym', '#sport'], frTags: ['#fitnessfr', '#muscu', '#sporttiktok'], enTags: ['#gymtok', '#workout', '#fitfam'] },
-  },
-  {
-    pattern: /amour|love|relation|couple|mec|meuf|boyfriend|girlfriend|dating|rencontre|rupture|breakup|mariage|wedding|kiss|câlin/i,
-    match: { tags: ['#love', '#relationship'], frTags: ['#amour', '#couple', '#relatable'], enTags: ['#dating', '#relationship', '#couplegoals'] },
-  },
-  {
-    pattern: /cuisine|food|recipe|recette|manger|restaurant|chef|plat|meal|cook|cooking|gastronomie|gourmet/i,
-    match: { tags: ['#food', '#foodie'], frTags: ['#cuisine', '#recette', '#foodtiktok'], enTags: ['#foodtok', '#recipe', '#cooking'] },
-  },
-  {
-    pattern: /voyage|travel|trip|vacances|holiday|pays|country|city|ville|explore|aventure|adventure|abroad|etranger/i,
-    match: { tags: ['#travel', '#explore'], frTags: ['#voyage', '#traveltiktok', '#aventure'], enTags: ['#wanderlust', '#traveltok', '#adventure'] },
-  },
-  {
-    pattern: /tech|technologie|ai|intelligence artificielle|application|app|software|digital|code|programme|ordinateur|phone|smartphone/i,
-    match: { tags: ['#tech', '#AI'], frTags: ['#techtok', '#technologie'], enTags: ['#technology', '#techreview'] },
-  },
-  {
-    pattern: /mode|fashion|style|outfit|vêtement|clothes|shopping|tendance|trend|luxe|luxury|marque|brand/i,
-    match: { tags: ['#fashion', '#style'], frTags: ['#mode', '#tenue', '#shopping'], enTags: ['#ootd', '#fashiontok', '#luxury'] },
-  },
-  {
-    pattern: /psycho|mental|anxiety|stress|dépression|depression|bien-être|wellbeing|santé|health|thérapie|therapy|motivat/i,
-    match: { tags: ['#mentalhealth', '#motivation'], frTags: ['#bienetre', '#psychologie'], enTags: ['#mindset', '#mentalhealthtok'] },
-  },
-  {
-    pattern: /music|musique|chanson|song|rap|hip.?hop|rnb|pop|artiste|artist|concert|album|clip/i,
-    match: { tags: ['#music', '#musicvideo'], frTags: ['#musique', '#artiste'], enTags: ['#musictok', '#newmusic'] },
-  },
-];
+// ── Hook pools per topic — varied, never the same twice ───────────────────
+// null = no text overlay needed for this clip
 
-function detectTopics(text: string, title: string): TopicMatch[] {
-  const full = text + ' ' + title;
-  return TOPICS.filter(t => t.pattern.test(full)).map(t => t.match);
+const HOOK_POOLS: Record<TopicKey, Array<{ fr: string | null; en: string | null }>> = {
+  car: [
+    { fr: 'Imagine ça dans ton garage 🤯',            en: 'Imagine waking up to this 🤯' },
+    { fr: 'Le son seul vaut le détour 🔊',            en: 'That sound though 🔊' },
+    { fr: null,                                        en: null },
+    { fr: 'Personne te parle de ça en France',        en: 'Nobody talks about this' },
+    { fr: 'La réaction dit tout 😱',                  en: 'The reaction says it all 😱' },
+    { fr: 'T\'as entendu ce bruit ?',                 en: 'Did you hear that?' },
+    { fr: '300 000€ en pleine rue 👀',                en: 'That price though 👀' },
+    { fr: 'Ce moment qui change tout 🔥',             en: 'The moment that changes everything 🔥' },
+  ],
+  money: [
+    { fr: 'Personne te dit ça sur l\'argent',         en: 'Nobody tells you this about money' },
+    { fr: 'Combien ça rapporte vraiment ? 💸',        en: 'How much does it actually make? 💸' },
+    { fr: null,                                        en: null },
+    { fr: 'La vérité sur les revenus passifs',        en: 'The truth about passive income' },
+    { fr: 'Ce que j\'aurais voulu savoir avant 💰',   en: 'What I wish I knew sooner 💰' },
+    { fr: 'La majorité des gens font cette erreur',   en: 'Most people get this wrong' },
+  ],
+  fitness: [
+    { fr: 'Ce que personne ne fait à la salle',       en: 'What nobody does at the gym' },
+    { fr: 'Avant / après en 30 jours 🔥',             en: '30 day transformation 🔥' },
+    { fr: null,                                        en: null },
+    { fr: 'Le vrai secret pour progresser 💪',        en: 'The real secret to progress 💪' },
+    { fr: 'Tu fais encore cette erreur ?',             en: 'Are you still making this mistake?' },
+  ],
+  food: [
+    { fr: 'La recette que tout le monde cherche 👨‍🍳', en: 'The recipe everyone\'s looking for 👨‍🍳' },
+    { fr: 'Mon chef secret 🤫',                       en: 'My secret ingredient 🤫' },
+    { fr: null,                                        en: null },
+    { fr: 'Ready in under 10 minutes ?',              en: 'Ready in 10 min — no excuses' },
+  ],
+  travel: [
+    { fr: 'Endroit que 99% ne connaissent pas 🌍',    en: '99% of people don\'t know this place 🌍' },
+    { fr: 'Ce que les agences ne te montrent pas',    en: 'What travel agencies don\'t show you' },
+    { fr: null,                                        en: null },
+    { fr: 'On a tout perdu et... 😱',                 en: 'We lost everything and... 😱' },
+    { fr: 'Le moment qui a tout changé ✈️',           en: 'The moment that changed everything ✈️' },
+  ],
+  tech: [
+    { fr: 'L\'IA que personne ne connaît encore',     en: 'The AI tool nobody knows yet' },
+    { fr: 'Ça remplace un emploi entier ?',           en: 'This replaces an entire job?' },
+    { fr: null,                                        en: null },
+    { fr: 'J\'ai testé pendant 30 jours...',          en: 'I tested this for 30 days...' },
+  ],
+  fashion: [
+    { fr: 'La tenue que tout le monde m\'a demandée', en: 'Everyone asked about this outfit' },
+    { fr: 'Budget: moins de 50€ 🛍️',                 en: 'Under $50 total 🛍️' },
+    { fr: null,                                        en: null },
+    { fr: 'La tendance avant qu\'elle explose 🔥',    en: 'The trend before it blows up 🔥' },
+  ],
+  relationship: [
+    { fr: 'Ce que personne ne te dit sur les couples', en: 'What nobody tells you about relationships' },
+    { fr: 'Red flag ou pas ? 🚩',                     en: 'Red flag or not? 🚩' },
+    { fr: null,                                        en: null },
+    { fr: 'La question qui change tout...',           en: 'The question that changes everything...' },
+  ],
+  music: [
+    { fr: 'La prod que tout le monde cherche 🎵',     en: 'The beat everyone\'s looking for 🎵' },
+    { fr: null,                                        en: null },
+    { fr: 'Reconnais-tu ce sample ?',                 en: 'Do you recognize this sample?' },
+    { fr: 'Ce son va te rester dans la tête 🔊',      en: 'This will be stuck in your head 🔊' },
+  ],
+  general: [
+    { fr: 'Le passage qui va tout changer 👀',        en: 'The part that changes everything 👀' },
+    { fr: null,                                        en: null },
+    { fr: 'Personne n\'en parle mais...',             en: 'Nobody talks about this but...' },
+    { fr: 'Ce moment là... 😱',                       en: 'This moment right here... 😱' },
+    { fr: 'La réalité que peu connaissent',           en: 'The reality most don\'t know' },
+    { fr: 'Attends jusqu\'à la fin ⏳',               en: 'Wait for the end ⏳' },
+  ],
+};
+
+function pickTopicHook(topicKey: TopicKey, index: number, lang: 'fr' | 'en'): string | null {
+  const pool = HOOK_POOLS[topicKey];
+  const entry = pool[index % pool.length];
+  return (lang === 'fr' ? entry.fr : entry.en) ?? null;
 }
 
-// ── Smart hashtags ─────────────────────────────────────────────────────────
+// ── Hashtag builder ────────────────────────────────────────────────────────
+
+const TOPIC_HASHTAGS: Record<TopicKey, { fr: string; en: string }> = {
+  car:          { fr: '#voiture #supercar #auto #carfrancais', en: '#car #supercar #automotive #carculture' },
+  money:        { fr: '#argent #business #entrepreneur #investissement', en: '#money #business #entrepreneur #investing' },
+  fitness:      { fr: '#fitness #muscu #sport #fitnessfr', en: '#fitness #gym #gymtok #workout' },
+  food:         { fr: '#cuisine #recette #foodtiktok #chef', en: '#food #recipe #cooking #foodtok' },
+  travel:       { fr: '#voyage #travel #aventure #monde', en: '#travel #wanderlust #adventure #explore' },
+  tech:         { fr: '#tech #ia #technologie #techtok', en: '#tech #AI #technology #techtok' },
+  fashion:      { fr: '#mode #tenue #shopping #style', en: '#fashion #style #ootd #fashiontok' },
+  relationship: { fr: '#couple #amour #relatable #relation', en: '#relationship #love #dating #couplegoals' },
+  music:        { fr: '#musique #artiste #rap #musicfr', en: '#music #musicvideo #newmusic #musictok' },
+  general:      { fr: '#france #tiktokfrance #tendance', en: '#trending #content #video' },
+};
 
 function buildHashtags(text: string, title: string, lang: 'fr' | 'en'): string {
-  const topics = detectTopics(text, title);
-  const tags = new Set<string>();
-
-  // Universal base
-  tags.add('#fyp');
-  tags.add('#foryou');
-  tags.add('#viral');
-  if (lang === 'fr') { tags.add('#france'); tags.add('#pourtoi'); }
-
-  for (const topic of topics.slice(0, 2)) {
-    topic.tags.forEach(t => tags.add(t));
-    if (lang === 'fr') topic.frTags.slice(0, 2).forEach(t => tags.add(t));
-    else topic.enTags.slice(0, 2).forEach(t => tags.add(t));
-  }
-
-  // Fallback niche tags if no topic detected
-  if (topics.length === 0) {
-    if (lang === 'fr') { tags.add('#france'); tags.add('#tiktokfrance'); tags.add('#tendance'); }
-    else { tags.add('#trending'); tags.add('#video'); tags.add('#content'); }
-  }
-
-  return Array.from(tags).slice(0, 8).join(' ');
+  const topicKey = detectTopicKey(text + ' ' + title);
+  const topicTags = TOPIC_HASHTAGS[topicKey][lang];
+  const base = lang === 'fr' ? '#fyp #foryou #viral #pourtoi' : '#fyp #foryou #viral #trending';
+  return `${base} ${topicTags}`;
 }
 
-// ── Call to action — varied & natural ─────────────────────────────────────
+// ── Caption builder ────────────────────────────────────────────────────────
 
 const CTA_FR = [
   'Abonne-toi pour la suite 🔔',
   'Sauvegarde si ça te parle 💾',
   'C\'est quoi ton avis ? 👇',
-  'Tu kiffes ou pas ? Commente 👇',
-  'Suuis pour plus de contenu comme ça ✅',
+  'Tu kiffes ? Dis-le en commentaire 👇',
+  'Suis pour plus de contenu comme ça ✅',
 ];
 const CTA_EN = [
   'Follow for more 🔥',
   'Save this for later 💾',
   'Drop your thoughts below 👇',
   'What do you think? Comment 👇',
-  'Turn on notifs so you don\'t miss it 🔔',
+  'Turn on notifs 🔔',
 ];
 
-function pickCTA(index: number, lang: 'fr' | 'en'): string {
-  const pool = lang === 'fr' ? CTA_FR : CTA_EN;
-  return pool[index % pool.length];
-}
-
-// ── Caption builder ────────────────────────────────────────────────────────
-
 function buildCaption(hook: string | null, transcript: string, hashtags: string, lang: 'fr' | 'en'): string {
-  // Use the actual transcript for the caption body (clean up a bit)
-  const body = transcript
-    .replace(/\[.*?\]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 150);
-
+  const body = transcript.replace(/\[.*?\]/g, '').replace(/\s+/g, ' ').trim().slice(0, 150);
   const ellipsis = transcript.length > 150 ? '...' : '';
   const opener = hook ? `${hook}\n\n` : '';
-  const cta = lang === 'fr' ? '👇 voir la suite' : '👇 watch till the end';
+  const cta = lang === 'fr' ? '👇 regarde jusqu\'à la fin' : '👇 watch till the end';
   return `${opener}${body}${ellipsis}\n\n${cta}\n\n${hashtags}`;
 }
-
-// ── Checklist (language-aware) ─────────────────────────────────────────────
 
 function buildChecklist(placement: 'top' | 'center' | 'bottom', lang: 'fr' | 'en'): string[] {
   if (lang === 'fr') {
     return [
       `Ajoute le texte hook en ${placement === 'top' ? 'haut' : placement === 'center' ? 'milieu' : 'bas'} d'écran (gras, blanc, contour noir)`,
-      'Active les sous-titres auto: Modifier → Sous-titres → Générer automatiquement',
+      'Active les sous-titres auto: Modifier → Sous-titres → Générer',
       'Coupe 0.5s de silence au début/fin si besoin',
-      'Visibilité: Tout le monde (pas Amis)',
-      'Poste entre 19h–22h heure locale pour max reach',
+      'Visibilité: Tout le monde',
+      'Poste entre 19h–22h heure locale 📅',
       'Réponds au 1er commentaire dans les 30 min 🚀',
     ];
   }
   return [
-    `Add hook text overlay at ${placement} of screen (bold white, black outline)`,
+    `Add hook text at ${placement} of screen (bold white, black outline)`,
     'Enable auto-captions: Edit → Captions → Auto-generate',
-    'Trim 0.5s of silence from start/end if needed',
-    'Set visibility to Everyone (not Friends)',
-    'Post between 7–10 PM local time for max reach',
+    'Trim 0.5s silence at start/end if needed',
+    'Set visibility to Everyone',
+    'Post 7–10 PM local time 📅',
     'Reply to first comment within 30 min 🚀',
   ];
 }
 
-// ── Engagement scoring ─────────────────────────────────────────────────────
+// ── Engagement scoring (for window selection) ─────────────────────────────
 
-const HOOK_KEYWORDS = [
-  'never', 'always', 'secret', 'truth', 'honest', 'actually', 'wait',
-  'wrong', 'mistake', 'crazy', 'insane', 'incredible', 'shocking',
-  'nobody', 'everyone', 'biggest', 'worst', 'best', 'only', 'changed',
-  'broke', 'stopped', 'quit', 'realized', 'discovered', 'earned', 'million',
-  'jamais', 'toujours', 'secret', 'vrai', 'honnêtement', 'fou', 'dingue',
-  'incroyable', 'choquant', 'personne', 'tout le monde', 'meilleur', 'pire',
-  'changé', 'arrêté', 'réalisé', 'découvert', 'gagné',
+const ENGAGE_WORDS = [
+  'never','always','secret','truth','honest','actually','wait','wrong','mistake',
+  'crazy','insane','incredible','shocking','nobody','everyone','biggest','worst',
+  'best','only','changed','stopped','quit','realized','million','jamais','toujours',
+  'secret','vrai','honnêtement','fou','dingue','incroyable','choquant','personne',
+  'tout le monde','meilleur','pire','changé','arrêté','réalisé','gagné',
 ];
 
 function scoreText(text: string): number {
   let score = 0;
   const lower = text.toLowerCase();
-  HOOK_KEYWORDS.forEach(kw => { if (lower.includes(kw)) score += 2; });
+  ENGAGE_WORDS.forEach(kw => { if (lower.includes(kw)) score += 2; });
   if (/\?/.test(text)) score += 5;
   if (/\d+/.test(text)) score += 3;
-  const exclamations = (text.match(/!/g) || []).length;
-  score += Math.min(exclamations * 2, 6);
+  score += Math.min((text.match(/!/g) || []).length * 2, 6);
   const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 5);
   const avgLen = sentences.length ? sentences.reduce((s, t) => s + t.length, 0) / sentences.length : 80;
   if (avgLen < 50) score += 3;
@@ -317,9 +346,7 @@ export function analyzeTranscriptForClips(
     if (elapsed >= MIN_CLIP_SEC) {
       windows.push({ start: startMs / 1000, end: endMs / 1000, text: text.trim(), score: scoreText(text) });
     }
-
-    const step = Math.max(1, Math.floor((j - i) * 0.6));
-    i += step;
+    i += Math.max(1, Math.floor((j - i) * 0.6));
   }
 
   if (!windows.length) return buildEvenClips(targetCount, videoDuration, videoTitle);
@@ -339,14 +366,14 @@ export function analyzeTranscriptForClips(
       const start = k * step;
       const end = Math.min(start + 25, videoDuration);
       const overlaps = selected.some(s => Math.max(s.start, start) < Math.min(s.end, end));
-      if (!overlaps) selected.push({ start, end, text: videoTitle, score: 0 });
+      if (!overlaps) selected.push({ start, end, text: '', score: 0 });
     }
   }
 
   return selected
     .sort((a, b) => a.start - b.start)
     .slice(0, targetCount)
-    .map((w, idx) => buildClipSegment(w, idx, targetCount, videoTitle));
+    .map((w, idx) => buildClipSegment(w, idx, targetCount, videoTitle, true));
 }
 
 function buildClipSegment(
@@ -354,23 +381,33 @@ function buildClipSegment(
   idx: number,
   total: number,
   title: string,
+  hasTranscript: boolean,
 ): ClipSegment {
-  const lang = detectLang(w.text + ' ' + title);
+  const lang = detectLang((w.text || '') + ' ' + title);
   const placements: Array<'top' | 'center' | 'bottom'> = ['top', 'center', 'bottom'];
   const placement = placements[idx % 3];
+  const topicKey = detectTopicKey((w.text || '') + ' ' + title);
 
-  // Smart hook: extracted from actual transcript
-  const hook = extractBestHook(w.text);
-  const hashtags = buildHashtags(w.text, title, lang);
-  const caption = buildCaption(hook, w.text, hashtags, lang);
-  const cta = pickCTA(idx, lang);
+  // Hook: try transcript first, fall back to topic-based pool hook
+  let hook: string | null = null;
+  if (hasTranscript && w.text) {
+    hook = extractBestHook(w.text);
+  }
+  // If no good hook found in transcript (or no transcript), use topic pool — always varied
+  if (!hook) {
+    hook = pickTopicHook(topicKey, idx, lang);
+  }
+
+  const hashtags = buildHashtags(w.text || '', title, lang);
+  const caption = buildCaption(hook, w.text || title, hashtags, lang);
+  const cta = (lang === 'fr' ? CTA_FR : CTA_EN)[idx % (lang === 'fr' ? CTA_FR : CTA_EN).length];
 
   return {
     index: idx,
     start: Math.max(0, parseFloat(w.start.toFixed(2))),
     end: parseFloat(w.end.toFixed(2)),
     duration: parseFloat((w.end - w.start).toFixed(2)),
-    transcript: w.text.trim(),
+    transcript: (w.text || title).trim(),
     score: w.score,
     hook,
     caption,
@@ -384,26 +421,9 @@ function buildClipSegment(
 function buildEvenClips(count: number, duration: number, title: string): ClipSegment[] {
   const clipDur = Math.min(30, duration / count);
   const step = (duration - clipDur) / Math.max(1, count - 1);
-  const lang = detectLang(title);
   return Array.from({ length: count }, (_, i) => {
     const start = parseFloat((i * step).toFixed(2));
     const end = parseFloat((start + clipDur).toFixed(2));
-    const hashtags = buildHashtags('', title, lang);
-    const hook = extractBestHook(title);
-    const caption = buildCaption(hook, title, hashtags, lang);
-    return {
-      index: i,
-      start,
-      end,
-      duration: parseFloat(clipDur.toFixed(2)),
-      transcript: title,
-      score: 0,
-      hook,
-      caption,
-      hashtags,
-      textPlacement: (['top', 'center', 'bottom'] as const)[i % 3],
-      callToAction: pickCTA(i, lang),
-      checklist: buildChecklist((['top', 'center', 'bottom'] as const)[i % 3], lang),
-    };
+    return buildClipSegment({ start, end, text: '', score: 0 }, i, count, title, false);
   });
 }
