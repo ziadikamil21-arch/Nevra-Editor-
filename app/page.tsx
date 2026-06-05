@@ -832,66 +832,19 @@ export default function Home() {
   };
 
   const getYtVideoBlob = async (url: string): Promise<Blob> => {
-    const errors: string[] = [];
-
-    // Extract video ID
-    let videoId = '';
+    // All download logic runs server-side to avoid browser CORS restrictions.
+    // The server calls Piped API (no CORS issue), gets the stream URL, and proxies bytes.
     try {
-      const u = new URL(url);
-      videoId = u.hostname === 'youtu.be'
-        ? u.pathname.slice(1).split('?')[0]
-        : (u.searchParams.get('v') ?? '');
-    } catch { videoId = url; }
-
-    if (!videoId) throw new Error('Invalid YouTube URL — could not extract video ID');
-
-    // ── 1. Piped API: open-source YT proxy, CORS-enabled, no API key ─────
-    // Stream URLs go through Piped's own servers (not YouTube CDN directly).
-    // They set Access-Control-Allow-Origin: * so browser fetch works fine.
-    const PIPED_INSTANCES = [
-      'https://pipedapi.kavin.rocks',
-      'https://piped-api.privacy.com.de',
-      'https://pipedapi.adminforge.de',
-    ];
-
-    for (const instance of PIPED_INSTANCES) {
-      try {
-        const infoRes = await fetch(`${instance}/streams/${videoId}`, {
-          headers: { 'Accept': 'application/json' },
-        });
-        if (!infoRes.ok) { errors.push(`Piped ${instance} → ${infoRes.status}`); continue; }
-        const info = await infoRes.json() as {
-          videoStreams: Array<{ url: string; quality: string; mimeType: string; videoOnly?: boolean }>;
-        };
-        const streams = info.videoStreams ?? [];
-        // Prefer 360p combined (itag 18 equivalent, videoOnly:false = has audio)
-        const stream = streams.find(s => s.quality === '360p' && !s.videoOnly)
-          ?? streams.find(s => s.quality === '480p' && !s.videoOnly)
-          ?? streams.find(s => !s.videoOnly && s.mimeType?.includes('mp4'))
-          ?? streams[0];
-
-        if (!stream?.url) { errors.push(`Piped ${instance}: no stream found`); continue; }
-
-        const videoRes = await fetch(stream.url);
-        if (!videoRes.ok || !videoRes.body) { errors.push(`Piped stream → ${videoRes.status}`); continue; }
-        const chunks = await ytStreamWithProgress(videoRes);
-        return new Blob(chunks as BlobPart[], { type: 'video/mp4' });
-      } catch (e) { errors.push(`Piped ${instance}: ${e}`); }
-    }
-
-    // ── 2. Server proxy final fallback ────────────────────────────────────
-    try {
-      const ytFullUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      const proxyRes = await fetch(`/api/yt-proxy?v=${encodeURIComponent(ytFullUrl)}`);
+      const proxyRes = await fetch(`/api/yt-proxy?v=${encodeURIComponent(url)}`);
       if (proxyRes.ok && proxyRes.body) {
         const chunks = await ytStreamWithProgress(proxyRes);
         return new Blob(chunks as BlobPart[], { type: 'video/mp4' });
       }
       const errData = await proxyRes.json().catch(() => ({})) as { error?: string };
-      errors.push(`server: ${errData.error ?? proxyRes.status}`);
-    } catch (e) { errors.push(`server: ${e}`); }
-
-    throw new Error(`Download failed — ${errors.slice(0, 3).join(' | ')}`);
+      throw new Error(errData.error ?? `Server returned ${proxyRes.status}`);
+    } catch (e) {
+      throw new Error(`Download failed — ${e}`);
+    }
   };
 
   // ── YouTube: ONE click → analyze + download + cut ─────────────────────
