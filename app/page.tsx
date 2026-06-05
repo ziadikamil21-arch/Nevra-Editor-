@@ -240,15 +240,6 @@ function YTClipCard({ clip, blobUrl, isProcessing, onDownload }: {
             <p className="text-xs" style={{ color: '#6b7280' }}>{clip.hashtags}</p>
           </div>
 
-          {/* Call to action */}
-          <div className="rounded-xl p-3" style={{ background: 'rgba(251,146,60,0.05)', border: '1px solid rgba(251,146,60,0.15)' }}>
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#fb923c' }}>🎯 Call to Action (end of clip)</p>
-              <CopyButton text={clip.callToAction} />
-            </div>
-            <p className="text-sm font-bold" style={{ color: '#f0f0ff' }}>"{clip.callToAction}"</p>
-          </div>
-
           {/* Checklist */}
           <div className="rounded-xl p-3 space-y-1.5" style={{ background: '#09091a', border: '1px solid #1a1a32' }}>
             <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: '#374151' }}>✅ Before posting checklist</p>

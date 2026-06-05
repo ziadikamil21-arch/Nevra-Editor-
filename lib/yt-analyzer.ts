@@ -17,7 +17,6 @@ export interface ClipSegment {
   caption: string;
   hashtags: string;
   textPlacement: 'top' | 'center' | 'bottom';
-  callToAction: string;
   checklist: string[];
 }
 
@@ -160,29 +159,24 @@ function buildHashtags(text: string, title: string, lang: 'fr' | 'en'): string {
   return `${base} ${topicTags}`;
 }
 
-// ── Caption builder ────────────────────────────────────────────────────────
-
-const CTA_FR = [
-  'Abonne-toi pour la suite 🔔',
-  'Sauvegarde si ça te parle 💾',
-  'C\'est quoi ton avis ? 👇',
-  'Tu kiffes ? Dis-le en commentaire 👇',
-  'Suis pour plus de contenu comme ça ✅',
-];
-const CTA_EN = [
-  'Follow for more 🔥',
-  'Save this for later 💾',
-  'Drop your thoughts below 👇',
-  'What do you think? Comment 👇',
-  'Turn on notifs 🔔',
-];
+// ── Caption builder — short, natural, conversational ─────────────────────
+// Written like a real person (not a marketing robot).
+// Hook → one punchy line → hashtags. That's it.
 
 function buildCaption(hook: string | null, transcript: string, hashtags: string, lang: 'fr' | 'en'): string {
-  const body = transcript.replace(/\[.*?\]/g, '').replace(/\s+/g, ' ').trim().slice(0, 150);
-  const ellipsis = transcript.length > 150 ? '...' : '';
-  const opener = hook ? `${hook}\n\n` : '';
-  const cta = lang === 'fr' ? '👇 regarde jusqu\'à la fin' : '👇 watch till the end';
-  return `${opener}${body}${ellipsis}\n\n${cta}\n\n${hashtags}`;
+  if (hook) {
+    // Caption IS the hook (lowercase vibe) + hashtags
+    const casual = hook.replace(/[.!?]+$/, '').toLowerCase();
+    return `${casual} 💀\n\n${hashtags}`;
+  }
+  // No hook — use a short snippet of the transcript if available
+  const snippet = transcript.replace(/\[.*?\]/g, '').replace(/\s+/g, ' ').trim();
+  if (snippet && snippet.length > 10) {
+    const short = snippet.slice(0, 80).replace(/\s\S+$/, '');
+    return `${short}...\n\n${hashtags}`;
+  }
+  // Pure hashtags only — clean
+  return hashtags;
 }
 
 function buildChecklist(placement: 'top' | 'center' | 'bottom', lang: 'fr' | 'en'): string[] {
@@ -315,7 +309,6 @@ function buildClipSegment(
 
   const hashtags = buildHashtags(w.text || '', title, lang);
   const caption = buildCaption(hook, w.text || title, hashtags, lang);
-  const cta = (lang === 'fr' ? CTA_FR : CTA_EN)[idx % (lang === 'fr' ? CTA_FR : CTA_EN).length];
 
   return {
     index: idx,
@@ -328,7 +321,6 @@ function buildClipSegment(
     caption,
     hashtags,
     textPlacement: placement,
-    callToAction: cta,
     checklist: buildChecklist(placement, lang),
   };
 }
