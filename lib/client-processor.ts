@@ -226,6 +226,7 @@ export function buildFFmpegArgs(
   p: TransformParams,
   isImage: boolean,
   hasAudio: boolean,
+  textPngName?: string,   // transparent PNG rendered by Canvas (PIL equivalent)
 ): string[] {
   const args: string[] = ['-i', inputName];
 
@@ -237,7 +238,18 @@ export function buildFFmpegArgs(
     args.push('-vf', vf ? `format=yuv420p,${vf}` : 'format=yuv420p');
     args.push('-vframes', '1', '-c:v', 'png', '-pix_fmt', 'rgb24');
   } else {
-    if (vf) args.push('-vf', vf);
+    if (textPngName) {
+      // Text overlay: second input is the transparent PNG, composited at 0:0.
+      // filter_complex is required (overlay takes two streams), so -vf is not used.
+      args.push('-i', textPngName);
+      const chain = vf ? `[0:v]${vf}[base]` : '[0:v]null[base]';
+      args.push('-filter_complex', `${chain};[base][1:v]overlay=0:0[out]`);
+      args.push('-map', '[out]');
+      if (hasAudio) args.push('-map', '0:a?');
+    } else if (vf) {
+      args.push('-vf', vf);
+    }
+
     const af = buildAudioFilters(p);
     if (hasAudio && af) args.push('-af', af);
     args.push(
