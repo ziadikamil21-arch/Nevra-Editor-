@@ -111,6 +111,11 @@ export function buildAlterArgs(
   // 5. Safety: even dimensions for yuv420p.
   vf.push('scale=trunc(iw/2)*2:trunc(ih/2)*2');
 
+  // 6. Force square pixels. Without this, `scale` compensates the crop's shape
+  //    change by writing a non-1:1 SAR (e.g. 2600:2619), so a 9:16 source ends
+  //    up as 325:582 and TikTok/Instagram letterbox or stretch the reel.
+  vf.push('setsar=1');
+
   const args = ['-i', inputName, '-vf', vf.join(',')];
 
   // Audio: keep sync with speed change (atempo preserves pitch better than resample).
@@ -139,7 +144,7 @@ export function buildMirrorArgs(
 ): string[] {
   return [
     '-i', inputName,
-    '-vf', 'hflip',
+    '-vf', 'hflip,setsar=1',
     '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p',
     ...(hasAudio ? ['-c:a', 'copy'] : ['-an']),
     '-map_metadata', '-1',
