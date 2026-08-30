@@ -11,8 +11,13 @@ import {
   getVariantsByFolder, saveVariant, deleteVariant,
   type NevraFolder, type NevraVariant,
 } from '@/lib/storage';
+import {
+  randomizeAlterParams, buildAlterArgs, buildMirrorArgs, alterConfigLog,
+  type AlterOptions,
+} from '@/lib/alter-processor';
+import { getVideoDimensions } from '@/lib/text-overlay';
 
-type FileMode = 'video' | 'photo';
+type FileMode = 'video' | 'photo' | 'trial';
 
 const QUALITY_CONFIG = {
   normal: {
@@ -506,6 +511,246 @@ function FolderBrowser({ folders, onClose, onFoldersChange }: {
   );
 }
 
+// ── Trial Reels ────────────────────────────────────────────────────────────────
+type TrialResultUI = {
+  id: string; name: string;
+  alterStatus: 'pending' | 'processing' | 'done' | 'error';
+  mirrorStatus: 'idle' | 'pending' | 'processing' | 'done' | 'error';
+  alterUrl: string | null; mirrorUrl: string | null;
+  alterName: string; mirrorName: string;
+  error?: string;
+};
+
+function TrialToggle({ on, onChange, label, hint }: { on: boolean; onChange: (v: boolean) => void; label: string; hint: string }) {
+  return (
+    <button onClick={() => onChange(!on)}
+      className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all"
+      style={{ background: on ? 'rgba(124,58,237,0.08)' : '#09091a', borderColor: on ? '#7c3aed' : '#1a1a32' }}>
+      <div className="text-left">
+        <p className="text-sm font-bold" style={{ color: on ? '#a78bfa' : '#9ca3af' }}>{label}</p>
+        <p className="text-[11px]" style={{ color: '#374151' }}>{hint}</p>
+      </div>
+      <div className="relative w-11 h-6 rounded-full flex-shrink-0 transition-all" style={{ background: on ? '#7c3aed' : '#1a1a32' }}>
+        <div className="absolute top-0.5 w-5 h-5 rounded-full shadow transition-all" style={{ background: 'white', left: on ? '22px' : '2px' }} />
+      </div>
+    </button>
+  );
+}
+
+function TrialReels(props: {
+  files: File[]; setFiles: (f: File[]) => void;
+  crop: number; setCrop: (v: number) => void;
+  speed: number; setSpeed: (v: number) => void;
+  color: boolean; setColor: (v: boolean) => void;
+  grain: boolean; setGrain: (v: boolean) => void;
+  autoMirror: boolean; setAutoMirror: (v: boolean) => void;
+  onRandomize: () => void;
+  processing: boolean; ffmpegReady: boolean;
+  results: TrialResultUI[];
+  mirrorPromptId: string | null;
+  onGenerate: () => void;
+  onMirrorYes: (id: string) => void;
+  onMirrorNo: () => void;
+  onDownload: (url: string, filename: string) => void;
+  folderName: string | null;
+}) {
+  const {
+    files, setFiles, crop, setCrop, speed, setSpeed, color, setColor, grain, setGrain,
+    autoMirror, setAutoMirror, onRandomize, processing, ffmpegReady, results,
+    mirrorPromptId, onGenerate, onMirrorYes, onMirrorNo, onDownload, folderName,
+  } = props;
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const addFiles = (list: FileList | null) => {
+    if (!list) return;
+    const vids = Array.from(list).filter((f) => f.type.startsWith('video/'));
+    if (vids.length) setFiles([...files, ...vids]);
+  };
+
+  const statusChip = (s: string) => {
+    if (s === 'done') return <span className="text-xs font-bold" style={{ color: '#10b981' }}>✓ Done</span>;
+    if (s === 'processing') return <span className="text-xs font-bold" style={{ color: '#a78bfa' }}>⚙ Processing…</span>;
+    if (s === 'error') return <span className="text-xs font-bold" style={{ color: '#ef4444' }}>✗ Error</span>;
+    if (s === 'pending') return <span className="text-xs" style={{ color: '#4b5563' }}>Queued</span>;
+    return null;
+  };
+
+  return (
+    <div className="mb-5">
+      {/* Drop zone (multi-file) */}
+      <div
+        className={`rounded-2xl border-2 border-dashed cursor-pointer mb-4 transition-all ${dragging ? 'drop-active' : ''}`}
+        style={{ borderColor: files.length ? '#3d2b6e' : '#1a1a32', background: files.length ? 'rgba(124,58,237,0.04)' : '#09091a' }}
+        onDrop={(e) => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onClick={() => inputRef.current?.click()}
+      >
+        <input ref={inputRef} type="file" accept="video/*" multiple className="hidden"
+          onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+        {files.length ? (
+          <div className="p-4 space-y-2">
+            {files.map((f, i) => (
+              <div key={i} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2" style={{ background: '#0c0c1e', border: '1px solid #1a1a32' }}>
+                <p className="text-xs font-semibold truncate" style={{ color: '#e2e8f0' }}>🎬 {f.name}</p>
+                <button onClick={(e) => { e.stopPropagation(); setFiles(files.filter((_, j) => j !== i)); }}
+                  className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] flex-shrink-0"
+                  style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>✕</button>
+              </div>
+            ))}
+            <p className="text-[11px] text-center pt-1" style={{ color: '#4b5563' }}>+ click / drop to add more</p>
+          </div>
+        ) : (
+          <div className="py-10 flex flex-col items-center gap-3">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl" style={{ background: '#0e0e22', border: '1px solid #1a1a32' }}>
+              {dragging ? '✨' : '⚡'}
+            </div>
+            <div className="text-center">
+              <p className="font-semibold" style={{ color: '#d1d5db' }}>Drop your video(s) here</p>
+              <p className="text-sm mt-1" style={{ color: '#374151' }}>MP4 · MOV · batch supported</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── ALTER settings ─────────────────────────────────────────────── */}
+      <div className="rounded-2xl border p-4 mb-3" style={{ background: '#09091a', borderColor: '#1a1a32' }}>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-bold uppercase tracking-widest" style={{ color: '#374151' }}>Alter settings</p>
+          <button onClick={onRandomize}
+            className="text-[11px] px-2.5 py-1 rounded-lg font-bold"
+            style={{ background: 'rgba(124,58,237,0.12)', color: '#a78bfa', border: '1px solid rgba(124,58,237,0.3)' }}>
+            🎲 Randomize
+          </button>
+        </div>
+
+        {/* Crop slider */}
+        <div className="mb-3">
+          <div className="flex justify-between text-xs mb-1.5">
+            <span style={{ color: '#9ca3af' }}>Crop intensity</span>
+            <span className="font-bold tabular-nums" style={{ color: '#a78bfa' }}>{(crop * 100).toFixed(0)}%</span>
+          </div>
+          <input type="range" min={5} max={12} step={0.5} value={crop * 100}
+            onChange={(e) => setCrop(parseFloat(e.target.value) / 100)}
+            className="w-full accent-purple-500" />
+        </div>
+
+        {/* Speed slider */}
+        <div className="mb-3">
+          <div className="flex justify-between text-xs mb-1.5">
+            <span style={{ color: '#9ca3af' }}>Speed variation</span>
+            <span className="font-bold tabular-nums" style={{ color: '#a78bfa' }}>{(speed * 100).toFixed(1)}%</span>
+          </div>
+          <input type="range" min={97} max={103} step={0.1} value={speed * 100}
+            onChange={(e) => setSpeed(parseFloat(e.target.value) / 100)}
+            className="w-full accent-purple-500" />
+        </div>
+
+        <div className="space-y-2">
+          <TrialToggle on={color} onChange={setColor} label="Auto color grading" hint="Random saturation / contrast / brightness / temp · skips the first 1.5s hook" />
+          <TrialToggle on={grain} onChange={setGrain} label="Subtle grain / noise" hint="Imperceptible film grain · changes pixel signature · skips the hook" />
+        </div>
+
+        <p className="text-[11px] mt-3 leading-relaxed" style={{ color: '#374151' }}>
+          Always applied: asymmetric crop, micro speed, full metadata rewrite (device/GPS wiped). The first 1.5s hook is never graded or grained.
+        </p>
+      </div>
+
+      {/* Auto mirror toggle */}
+      <div className="mb-4">
+        <TrialToggle on={autoMirror} onChange={setAutoMirror}
+          label="Auto Mirror (one-click batch)" hint="Chain a Mirror from each Alter automatically — no prompt" />
+      </div>
+
+      {/* Generate button */}
+      <button onClick={onGenerate} disabled={!files.length || !ffmpegReady || processing}
+        className="btn-gradient w-full py-4 rounded-2xl font-bold text-base text-white tracking-widest uppercase mb-4">
+        {processing ? (
+          <span className="flex items-center justify-center gap-2">
+            <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+            </svg>
+            Processing…
+          </span>
+        ) : !ffmpegReady ? 'Loading engine…'
+          : autoMirror ? `⚡ Generate Alter + Mirror (${files.length})` : `⚡ Generate Alter (${files.length})`}
+      </button>
+
+      {/* Results */}
+      {results.length > 0 && (
+        <div className="space-y-3">
+          {folderName && (
+            <p className="text-[11px]" style={{ color: '#6b7280' }}>
+              📁 Saved to <span style={{ color: '#a78bfa' }}>{folderName}</span>
+            </p>
+          )}
+          {results.map((r) => (
+            <div key={r.id} className="rounded-2xl border overflow-hidden" style={{ background: '#0c0c1e', borderColor: '#1a1a32' }}>
+              <div className="px-4 py-3 border-b" style={{ borderColor: '#1a1a32' }}>
+                <p className="text-sm font-bold truncate" style={{ color: '#f0f0ff' }}>{r.name}</p>
+              </div>
+              <div className="p-3 space-y-2">
+                {/* Alter row */}
+                <div className="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5" style={{ background: '#09091a', border: '1px solid #1a1a32' }}>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold" style={{ color: '#a78bfa' }}>ALTER</p>
+                    <p className="text-[11px] truncate" style={{ color: '#4b5563' }}>{r.alterName}</p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {statusChip(r.alterStatus)}
+                    {r.alterStatus === 'done' && r.alterUrl && (
+                      <button onClick={() => onDownload(r.alterUrl!, r.alterName)}
+                        className="text-xs px-3 py-1.5 rounded-lg font-bold"
+                        style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: 'white' }}>⬇</button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Mirror row */}
+                {r.mirrorStatus !== 'idle' && (
+                  <div className="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5" style={{ background: '#09091a', border: '1px solid #1a1a32' }}>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold" style={{ color: '#67e8f9' }}>🪞 MIRROR</p>
+                      <p className="text-[11px] truncate" style={{ color: '#4b5563' }}>{r.mirrorName}</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {statusChip(r.mirrorStatus)}
+                      {r.mirrorStatus === 'done' && r.mirrorUrl && (
+                        <button onClick={() => onDownload(r.mirrorUrl!, r.mirrorName)}
+                          className="text-xs px-3 py-1.5 rounded-lg font-bold"
+                          style={{ background: 'linear-gradient(135deg,#0891b2,#0e7490)', color: 'white' }}>⬇</button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Mirror prompt */}
+                {mirrorPromptId === r.id && r.alterStatus === 'done' && r.mirrorStatus === 'idle' && (
+                  <div className="rounded-xl p-3" style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.25)' }}>
+                    <p className="text-xs font-semibold mb-2" style={{ color: '#d1d5db' }}>Generate a Mirror version from this Alter?</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button onClick={onMirrorNo}
+                        className="py-2 rounded-lg text-xs font-bold"
+                        style={{ background: '#0f0f25', border: '1px solid #2d2d5a', color: '#9ca3af' }}>No</button>
+                      <button onClick={() => onMirrorYes(r.id)}
+                        className="py-2 rounded-lg text-xs font-bold"
+                        style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: 'white' }}>🪞 Yes, Mirror</button>
+                    </div>
+                  </div>
+                )}
+
+                {r.error && <p className="text-[11px]" style={{ color: '#f87171' }}>{r.error}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 export default function Home() {
   const [activeMode, setActiveMode] = useState<FileMode>('video');
@@ -525,6 +770,26 @@ export default function Home() {
   const [textPos, setTextPos] = useState<{ xPct: number; yPct: number }>({ xPct: 0.1, yPct: 0.1 });
   const [textConfirmed, setTextConfirmed] = useState(false);
   const [pickingPos, setPickingPos] = useState(false);
+
+  // ── Trial Reels state ──────────────────────────────────────────────────────
+  type TrialResult = {
+    id: string; name: string;
+    alterStatus: 'pending' | 'processing' | 'done' | 'error';
+    mirrorStatus: 'idle' | 'pending' | 'processing' | 'done' | 'error';
+    alterUrl: string | null; mirrorUrl: string | null;
+    alterName: string; mirrorName: string;
+    error?: string;
+  };
+  const [trialFiles, setTrialFiles] = useState<File[]>([]);
+  const [trialProcessing, setTrialProcessing] = useState(false);
+  const [trialResults, setTrialResults] = useState<TrialResult[]>([]);
+  const [trialCrop, setTrialCrop] = useState(0.08);        // 5–12 %
+  const [trialSpeed, setTrialSpeed] = useState(1.0);        // 97–103 %
+  const [trialColor, setTrialColor] = useState(true);
+  const [trialGrain, setTrialGrain] = useState(false);
+  const [trialAutoMirror, setTrialAutoMirror] = useState(false);
+  const [trialMirrorPromptId, setTrialMirrorPromptId] = useState<string | null>(null);
+  const [trialFolder, setTrialFolder] = useState<NevraFolder | null>(null);
 
   // Photo state
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -793,6 +1058,141 @@ export default function Home() {
   const downloadAll = (variants: ClientVariant[], deleted: Set<number>) =>
     variants.filter((v) => !deleted.has(v.index) && v.status === 'done' && v.blobUrl).forEach(downloadVariant);
 
+  // ── Trial Reels: helpers ────────────────────────────────────────────────────
+  const trialUid = () =>
+    (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `t${Date.now()}${Math.random()}`;
+
+  const randomizeTrial = () => {
+    setTrialCrop(+(0.05 + Math.random() * 0.07).toFixed(3));   // 5–12 %
+    setTrialSpeed(+(0.97 + Math.random() * 0.06).toFixed(3));  // 97–103 %
+    setTrialColor(true);
+    setTrialGrain(Math.random() > 0.5);
+  };
+
+  const baseName = (f: string) => f.replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '_');
+
+  // Ensure a "TrialReels {date}" folder exists (type video) and return it.
+  const ensureTrialFolder = async (): Promise<NevraFolder> => {
+    if (trialFolder) return trialFolder;
+    const dateStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+    const folder = await createFolder(`TrialReels ${dateStr}`, 'video');
+    setFolders((prev) => [folder, ...prev]);
+    setTrialFolder(folder);
+    return folder;
+  };
+
+  // Run the Alter pass on one file; optionally chain Mirror.
+  const runAlterOnFile = async (file: File, resultId: string, alsoMirror: boolean) => {
+    const ff = ffVideoRef.current!;
+    const { fetchFile } = await import('@ffmpeg/util');
+    const name = baseName(file.name);
+    const inName = `trial_in_${Math.random().toString(36).slice(2, 8)}.mp4`;
+    const alterName = `${name}_alter.mp4`;
+    const mirrorName = `${name}_alter_mirror.mp4`;
+
+    setTrialResults((prev) => prev.map((r) => r.id === resultId ? { ...r, alterStatus: 'processing' } : r));
+
+    try {
+      const { width, height } = await getVideoDimensions(file);
+      const opts: AlterOptions = { cropPct: trialCrop, speedPct: trialSpeed, colorGrade: trialColor, grain: trialGrain };
+      const p = randomizeAlterParams(opts);
+      // Log the exact random values used, so a good preset can be reproduced.
+      console.log(`[TrialReels] ${alterName} config:`, alterConfigLog(p));
+
+      await ff.writeFile(inName, await fetchFile(file));
+      const alterOut = `alter_${Math.random().toString(36).slice(2, 8)}.mp4`;
+      await ff.exec(buildAlterArgs(inName, alterOut, p, width, height, true));
+      const alterRaw = await ff.readFile(alterOut);
+      const alterBlob = new Blob([alterRaw as unknown as BlobPart], { type: 'video/mp4' });
+      const alterUrl = URL.createObjectURL(alterBlob);
+
+      const folder = await ensureTrialFolder();
+      await saveVariant({ folderId: folder.id, filename: alterName, blob: alterBlob, size: alterBlob.size, summary: null, type: 'video' }).catch(console.error);
+
+      setTrialResults((prev) => prev.map((r) => r.id === resultId ? { ...r, alterStatus: 'done', alterUrl } : r));
+
+      if (alsoMirror) {
+        setTrialResults((prev) => prev.map((r) => r.id === resultId ? { ...r, mirrorStatus: 'processing' } : r));
+        // Mirror takes the ALTER output as input, not the original.
+        const mirrorOut = `mirror_${Math.random().toString(36).slice(2, 8)}.mp4`;
+        await ff.exec(buildMirrorArgs(alterOut, mirrorOut, true));
+        const mirrorRaw = await ff.readFile(mirrorOut);
+        const mirrorBlob = new Blob([mirrorRaw as unknown as BlobPart], { type: 'video/mp4' });
+        const mirrorUrl = URL.createObjectURL(mirrorBlob);
+        await saveVariant({ folderId: folder.id, filename: mirrorName, blob: mirrorBlob, size: mirrorBlob.size, summary: null, type: 'video' }).catch(console.error);
+        setTrialResults((prev) => prev.map((r) => r.id === resultId ? { ...r, mirrorStatus: 'done', mirrorUrl } : r));
+        try { await ff.deleteFile(mirrorOut); } catch { /* ok */ }
+      }
+
+      try { await ff.deleteFile(alterOut); } catch { /* ok */ }
+      try { await ff.deleteFile(inName); } catch { /* ok */ }
+    } catch (err) {
+      setTrialResults((prev) => prev.map((r) => r.id === resultId ? { ...r, alterStatus: 'error', mirrorStatus: 'idle', error: String(err) } : r));
+      try { await ff.deleteFile(inName); } catch { /* ok */ }
+    }
+  };
+
+  // Main entry: generate Alter (and Mirror if auto) for every dropped file.
+  const handleTrialGenerate = async () => {
+    if (!trialFiles.length || !ffmpegReady || trialProcessing) return;
+    setTrialProcessing(true);
+    setError(null);
+    setTrialMirrorPromptId(null);
+
+    const results: TrialResult[] = trialFiles.map((f) => ({
+      id: trialUid(), name: f.name,
+      alterStatus: 'pending', mirrorStatus: 'idle',
+      alterUrl: null, mirrorUrl: null,
+      alterName: `${baseName(f.name)}_alter.mp4`,
+      mirrorName: `${baseName(f.name)}_alter_mirror.mp4`,
+    }));
+    setTrialResults(results);
+
+    for (let i = 0; i < trialFiles.length; i++) {
+      await runAlterOnFile(trialFiles[i], results[i].id, trialAutoMirror);
+    }
+
+    setTrialProcessing(false);
+    // Single file, no auto-mirror → ask whether to chain a Mirror.
+    if (trialFiles.length === 1 && !trialAutoMirror) {
+      setTrialMirrorPromptId(results[0].id);
+    }
+  };
+
+  // User answered "Yes" to the Mirror prompt: mirror the already-made Alter.
+  const handleTrialMirror = async (resultId: string) => {
+    const r = trialResults.find((x) => x.id === resultId);
+    if (!r || r.alterStatus !== 'done') return;
+    setTrialMirrorPromptId(null);
+    setTrialProcessing(true);
+    const ff = ffVideoRef.current!;
+    try {
+      const { fetchFile } = await import('@ffmpeg/util');
+      // Re-load the alter blob (we saved it in the folder / have the URL).
+      const alterBlob = await fetch(r.alterUrl!).then((res) => res.blob());
+      const inName = `mirror_in_${Math.random().toString(36).slice(2, 8)}.mp4`;
+      const mirrorOut = `mirror_${Math.random().toString(36).slice(2, 8)}.mp4`;
+      await ff.writeFile(inName, await fetchFile(alterBlob));
+      setTrialResults((prev) => prev.map((x) => x.id === resultId ? { ...x, mirrorStatus: 'processing' } : x));
+      await ff.exec(buildMirrorArgs(inName, mirrorOut, true));
+      const raw = await ff.readFile(mirrorOut);
+      const blob = new Blob([raw as unknown as BlobPart], { type: 'video/mp4' });
+      const url = URL.createObjectURL(blob);
+      const folder = await ensureTrialFolder();
+      await saveVariant({ folderId: folder.id, filename: r.mirrorName, blob, size: blob.size, summary: null, type: 'video' }).catch(console.error);
+      setTrialResults((prev) => prev.map((x) => x.id === resultId ? { ...x, mirrorStatus: 'done', mirrorUrl: url } : x));
+      try { await ff.deleteFile(inName); } catch { /* ok */ }
+      try { await ff.deleteFile(mirrorOut); } catch { /* ok */ }
+    } catch (err) {
+      setTrialResults((prev) => prev.map((x) => x.id === resultId ? { ...x, mirrorStatus: 'error', error: String(err) } : x));
+    }
+    setTrialProcessing(false);
+  };
+
+  const downloadUrl = (url: string, filename: string) => {
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+  };
+
   return (
     <div className="min-h-screen" style={{ background: '#030308' }}>
       <div className="fixed top-[-300px] left-[-300px] w-[700px] h-[700px] rounded-full pointer-events-none"
@@ -829,11 +1229,11 @@ export default function Home() {
         {/* Mode toggle */}
         <div className="flex justify-center mb-5">
           <div className="flex rounded-2xl p-1 gap-1" style={{ background: '#0d0d1e', border: '1px solid #1c1c3a' }}>
-            {(['video', 'photo'] as FileMode[]).map((m) => {
+            {(['video', 'photo', 'trial'] as FileMode[]).map((m) => {
               const sel = activeMode === m;
-              const hasFile = m === 'video' ? !!videoFile : !!photoFile;
-              const proc = m === 'video' ? videoIsProcessing : photoIsProcessing;
-              const label = m === 'video' ? '🎬  Video' : '🖼️  Photo';
+              const hasFile = m === 'video' ? !!videoFile : m === 'photo' ? !!photoFile : trialFiles.length > 0;
+              const proc = m === 'video' ? videoIsProcessing : m === 'photo' ? photoIsProcessing : trialProcessing;
+              const label = m === 'video' ? '🎬  Video' : m === 'photo' ? '🖼️  Photo' : '⚡  Trial Reels';
               return (
                 <button key={m} onClick={() => switchMode(m)}
                   className="relative px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200"
@@ -853,6 +1253,29 @@ export default function Home() {
           </div>
         </div>
 
+        {/* ══ TRIAL REELS ═══════════════════════════════════════════════════ */}
+        {activeMode === 'trial' && (
+          <TrialReels
+            files={trialFiles} setFiles={setTrialFiles}
+            crop={trialCrop} setCrop={setTrialCrop}
+            speed={trialSpeed} setSpeed={setTrialSpeed}
+            color={trialColor} setColor={setTrialColor}
+            grain={trialGrain} setGrain={setTrialGrain}
+            autoMirror={trialAutoMirror} setAutoMirror={setTrialAutoMirror}
+            onRandomize={randomizeTrial}
+            processing={trialProcessing}
+            ffmpegReady={ffmpegReady}
+            results={trialResults}
+            mirrorPromptId={trialMirrorPromptId}
+            onGenerate={handleTrialGenerate}
+            onMirrorYes={handleTrialMirror}
+            onMirrorNo={() => setTrialMirrorPromptId(null)}
+            onDownload={downloadUrl}
+            folderName={trialFolder?.name ?? null}
+          />
+        )}
+
+        {activeMode !== 'trial' && <>
         {/* Drop zone */}
         <div
           className={`rounded-2xl border-2 border-dashed cursor-pointer mb-5 transition-all duration-200 ${isDragging ? 'drop-active' : ''}`}
@@ -1167,6 +1590,7 @@ export default function Home() {
           ) : (activeMode === 'video' && !ffmpegReady) ? 'Loading engine...'
             : `⚡  Create ${variantCount} Variant${variantCount !== 1 ? 's' : ''}`}
         </button>
+        </>}
 
         {/* Results */}
         <ResultsSection label="Video Results" icon="🎬"
